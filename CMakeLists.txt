@@ -13,6 +13,8 @@ find_package (Vulkan REQUIRED)
 add_executable(app
     src/main.cpp
     src/volk.cpp
+    src/vulkan_utils.cpp
+    src/vulkan_utils.hpp
 )
 
 target_compile_features(app PRIVATE cxx_std_23)
@@ -24,5 +26,4 @@ target_include_directories(app PRIVATE
 target_link_libraries(app PRIVATE
     SDL3::SDL3
     Vulkan::Headers
-    #Vulkan::Vulkan
 )

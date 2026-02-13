@@ -1,8 +1,9 @@
+#include "vulkan_utils.hpp"
+
 #define SDL_MAIN_USE_CALLBACKS
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL_vulkan.h>
-#include <volk/volk.h>
 
 #include <algorithm>
 #include <iostream>
@@ -41,6 +42,40 @@ vk_debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
     return VK_FALSE;
 }
 
+VkExtent2D choose_swap_extent(SDL_Window* window, const VkSurfaceCapabilitiesKHR& capabilities) {
+    if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+        return capabilities.currentExtent;
+    }
+
+    int width, height;
+    SDL_GetWindowSizeInPixels(window, &width, &height);
+
+    return {
+        std::clamp<uint32_t>(width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
+        std::clamp<uint32_t>(height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height)
+    };
+}
+
+VkSurfaceFormatKHR choose_swap_surface_format(std::span<const VkSurfaceFormatKHR> formats) {
+    for (auto& format : formats) {
+        if (format.format == VK_FORMAT_B8G8R8_SRGB && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            return format;
+        }
+    }
+
+    return formats[0];
+}
+
+VkPresentModeKHR choose_swap_present_mode(std::span<const VkPresentModeKHR> present_modes) {
+    for (const auto& present_mode : present_modes) {
+        if (present_mode == VK_PRESENT_MODE_MAILBOX_KHR) {
+            return present_mode;
+        }
+    }
+
+    return VK_PRESENT_MODE_FIFO_KHR;
+}
+
 SDL_Window* sdl_window = nullptr;
 VkInstance vk_instance = VK_NULL_HANDLE;
 VkDebugUtilsMessengerEXT vk_debug_messenger = VK_NULL_HANDLE;
@@ -49,6 +84,9 @@ VkPhysicalDevice vk_physical_device = VK_NULL_HANDLE;
 uint32_t vk_queue_family_index = 0;
 VkDevice vk_device = VK_NULL_HANDLE;
 VkQueue vk_queue = VK_NULL_HANDLE;
+VkSwapchainKHR vk_swapchain = VK_NULL_HANDLE;
+std::vector<VkImage> vk_swapchain_images;
+std::vector<VkImageView> vk_swapchain_images_views;
 
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -74,12 +112,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     }
 
     std::vector<const char*> required_extensions = get_required_extensions();
-
-    uint32_t instance_extension_props_count = 0;
-    vkEnumerateInstanceExtensionProperties(nullptr, &instance_extension_props_count, nullptr);
-    std::vector<VkExtensionProperties> instance_extension_props{ instance_extension_props_count };
-    vkEnumerateInstanceExtensionProperties(nullptr, &instance_extension_props_count, instance_extension_props.data());
-
+    auto instance_extension_props = vkutils::get_instance_extension_properties();
     for (auto& extension : required_extensions) {
         if (std::ranges::none_of(instance_extension_props,
                                  [extension](auto& extension_prop) {
@@ -94,10 +127,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         required_layers.push_back("VK_LAYER_KHRONOS_validation");
     }
 
-    uint32_t instance_layer_props_count = 0;
-    vkEnumerateInstanceLayerProperties(&instance_layer_props_count, nullptr);
-    std::vector<VkLayerProperties> instance_layer_props{ instance_layer_props_count };
-    vkEnumerateInstanceLayerProperties(&instance_layer_props_count, instance_layer_props.data());
+    auto instance_layer_props = vkutils::get_instance_layer_properties();
 
     if (std::ranges::any_of(required_layers,
                             [&instance_layer_props](auto& required_layer) {
@@ -123,26 +153,12 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     instance_create_info.ppEnabledExtensionNames = required_extensions.data();
     instance_create_info.enabledLayerCount = static_cast<uint32_t>(required_layers.size());
     instance_create_info.ppEnabledLayerNames = required_layers.data();
-    // if (enable_validation_layers) {
-    //     instance_create_info.pNext = &dbg_msg_create_info;
-    // }
     vkCreateInstance(&instance_create_info, nullptr, &vk_instance);
     
     volkLoadInstanceOnly(vk_instance);
 
     if (enable_validation_layers) {
-        VkDebugUtilsMessengerCreateInfoEXT dbg_msg_create_info = {};
-        dbg_msg_create_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-        dbg_msg_create_info.messageSeverity =
-            //VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-            VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-            VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-        dbg_msg_create_info.messageType =
-            VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-            VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-            VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-        dbg_msg_create_info.pfnUserCallback = vk_debug_callback;
-        vkCreateDebugUtilsMessengerEXT(vk_instance, &dbg_msg_create_info, nullptr, &vk_debug_messenger);
+        vk_debug_messenger = vkutils::create_debug_messenger(vk_instance, vk_debug_callback);
     }
 
     if (!SDL_Vulkan_CreateSurface(sdl_window, vk_instance, nullptr, &vk_surface)) {
@@ -150,43 +166,21 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
 
-    uint32_t physical_devices_count = 0;
-    vkEnumeratePhysicalDevices(vk_instance, &physical_devices_count, nullptr);
-    std::vector<VkPhysicalDevice> physical_devices{ physical_devices_count };
-    vkEnumeratePhysicalDevices(vk_instance, &physical_devices_count, physical_devices.data());
-
     std::vector<const char*> required_device_extensions = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
-
+    auto physical_devices = vkutils::get_physical_devices(vk_instance);
     for (auto& physical_device : physical_devices) {
         // TODO(Kostu): Device scoring
-        VkPhysicalDeviceProperties2 physical_device_props = {};
-        physical_device_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-        vkGetPhysicalDeviceProperties2(physical_device, &physical_device_props);
-
-        VkPhysicalDeviceFeatures2 physical_device_feats = {};
-        physical_device_feats.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-        vkGetPhysicalDeviceFeatures2(physical_device, &physical_device_feats);
-
-        uint32_t physical_device_extensions_count = 0;
-        vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &physical_device_extensions_count, nullptr);
-        std::vector<VkExtensionProperties> physical_device_extensions{ physical_device_extensions_count };
-        vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &physical_device_extensions_count, physical_device_extensions.data());
-
-        uint32_t queue_families_count = 0;
-        vkGetPhysicalDeviceQueueFamilyProperties2(physical_device, &queue_families_count, nullptr);
-        std::vector<VkQueueFamilyProperties2> queue_families{ queue_families_count };
-        for (auto& queue_family : queue_families) {
-            queue_family.sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2;
-            queue_family.pNext = nullptr;
-        }
-        vkGetPhysicalDeviceQueueFamilyProperties2(physical_device, &queue_families_count, queue_families.data());
+        auto physical_device_props = vkutils::get_physical_device_properties(physical_device);
+        auto physical_device_feats = vkutils::get_physical_device_features(physical_device);
+        auto physical_device_extensions = vkutils::get_physical_device_extension_properties(physical_device);
+        auto queue_family_props = vkutils::get_physical_queue_family_properties(physical_device);
 
         bool is_suitable = (physical_device_props.properties.apiVersion >= VK_API_VERSION_1_3);
 
         bool has_graphics_capable_queue = false;
-        for (auto [idx, queue_family] : std::views::enumerate(queue_families)) {
+        for (auto [idx, queue_family] : std::views::enumerate(queue_family_props)) {
             bool present_supported = SDL_Vulkan_GetPresentationSupport(vk_instance, physical_device, idx);
             if ((queue_family.queueFamilyProperties.queueFlags & VK_QUEUE_GRAPHICS_BIT) && present_supported) {
                 has_graphics_capable_queue = true;
@@ -201,10 +195,11 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
             auto it = std::ranges::find_if(physical_device_extensions, [extension](auto& ext) {return strcmp(ext.extensionName, extension) == 0;});
             found = found && it != physical_device_extensions.end();
         }
-            is_suitable = is_suitable && found;
+        is_suitable = is_suitable && found;
 
         if (is_suitable) {
             vk_physical_device = physical_device;
+            break;
         }
     }
 
@@ -248,6 +243,52 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
 
+    auto surface_caps = vkutils::get_physical_device_surface_capabilities(vk_physical_device, vk_surface);
+    auto surface_formats = vkutils::get_physical_device_surface_formats(vk_physical_device, vk_surface);
+    auto surface_present_modes = vkutils::get_physical_device_surface_present_modes(vk_physical_device, vk_surface);
+
+    auto extent = choose_swap_extent(sdl_window, surface_caps);
+    auto format = choose_swap_surface_format(surface_formats);
+    auto present_mode = choose_swap_present_mode(surface_present_modes);
+
+    auto swap_image_count = std::max( 3u, surface_caps.minImageCount );
+    swap_image_count = (surface_caps.maxImageCount > 0 && swap_image_count > surface_caps.maxImageCount) ? surface_caps.maxImageCount : swap_image_count;
+
+    VkSwapchainCreateInfoKHR swapchain_create_info = {};
+    swapchain_create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    swapchain_create_info.surface = vk_surface;
+    swapchain_create_info.minImageCount = swap_image_count;
+    swapchain_create_info.imageFormat = format.format;
+    swapchain_create_info.imageColorSpace = format.colorSpace;
+    swapchain_create_info.imageExtent = extent;
+    swapchain_create_info.imageArrayLayers = 1;
+    swapchain_create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    swapchain_create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    swapchain_create_info.preTransform = surface_caps.currentTransform;
+    swapchain_create_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    swapchain_create_info.presentMode = present_mode;
+    swapchain_create_info.clipped = VK_TRUE;
+    swapchain_create_info.oldSwapchain = VK_NULL_HANDLE;
+    vkCreateSwapchainKHR(vk_device, &swapchain_create_info, nullptr, &vk_swapchain);
+
+    uint32_t images_count = 0;
+    vkGetSwapchainImagesKHR(vk_device, vk_swapchain, &images_count, nullptr);
+    vk_swapchain_images.resize(images_count);
+    vkGetSwapchainImagesKHR(vk_device, vk_swapchain, &images_count, vk_swapchain_images.data());
+
+    VkImageViewCreateInfo image_view_create_info = {};
+    image_view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    image_view_create_info.format = format.format;
+    image_view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    image_view_create_info.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    vk_swapchain_images_views.reserve(vk_swapchain_images.size());
+    for (auto image : vk_swapchain_images) {
+        image_view_create_info.image = image;
+        VkImageView view;
+        vkCreateImageView(vk_device, &image_view_create_info, nullptr, &view);
+        vk_swapchain_images_views.push_back(view);
+    }
+
     return SDL_APP_CONTINUE;
 }
 
@@ -267,6 +308,10 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 }
 
 void SDL_AppQuit(void* appstate, SDL_AppResult result) {
+    for (auto& image_view : vk_swapchain_images_views) {
+        vkDestroyImageView(vk_device, image_view, nullptr);
+    }
+    vkDestroySwapchainKHR(vk_device, vk_swapchain, nullptr);
     vkDestroyDevice(vk_device, nullptr);
     SDL_Vulkan_DestroySurface(vk_instance, vk_surface, nullptr);
     if (enable_validation_layers) {

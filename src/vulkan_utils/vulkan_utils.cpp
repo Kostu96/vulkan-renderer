@@ -36,11 +36,6 @@ std::vector<VkLayerProperties> get_instance_layer_properties() {
     return props;
 }
 
-VkInstance create_instance() {
-    // TODO(Kostu): impl
-    return VK_NULL_HANDLE;
-}
-
 VkDebugUtilsMessengerEXT create_debug_messenger(VkInstance instance,
                                                 PFN_vkDebugUtilsMessengerCallbackEXT callback) {
     VkDebugUtilsMessengerEXT messenger;

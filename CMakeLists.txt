@@ -11,15 +11,18 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 find_package (Vulkan REQUIRED)
 
 add_executable(app
+    src/vulkan_utils/instance.cpp
+    src/vulkan_utils/instance.hpp
+    src/vulkan_utils/volk.cpp
+    src/vulkan_utils/vulkan_utils.cpp
+    src/vulkan_utils/vulkan_utils.hpp
     src/main.cpp
-    src/volk.cpp
-    src/vulkan_utils.cpp
-    src/vulkan_utils.hpp
 )
 
 target_compile_features(app PRIVATE cxx_std_23)
 
 target_include_directories(app PRIVATE
+    src
     third_party/volk/include
 )
 
@@ -27,3 +30,46 @@ target_link_libraries(app PRIVATE
     SDL3::SDL3
     Vulkan::Headers
 )
+
+find_program(SLANGC_EXECUTABLE
+    NAMES
+    slangc
+    slangc.exe
+)
+
+set(SHADER_SOURCE_DIR ${CMAKE_SOURCE_DIR}/shaders)
+set(SHADER_OUTPUT_DIR ${CMAKE_BINARY_DIR}/shaders)
+
+file(MAKE_DIRECTORY ${SHADER_OUTPUT_DIR})
+
+file(GLOB SHADER_FILES
+    ${SHADER_SOURCE_DIR}/*.slang
+)
+
+set(COMPILED_SHADERS "")
+foreach(SHADER ${SHADER_FILES})
+    get_filename_component(FILE_NAME ${SHADER} NAME_WE)
+    set(OUTPUT_FILE ${SHADER_OUTPUT_DIR}/${FILE_NAME}.spv)
+
+    add_custom_command(
+        OUTPUT ${OUTPUT_FILE}
+        COMMAND ${SLANGC_EXECUTABLE}
+            ${SHADER}
+            -target spirv
+            -profile spirv_1_4
+            -emit-spirv-directly
+            -fvk-use-entrypoint-name -entry vert_main -entry frag_main
+            -o ${OUTPUT_FILE}
+        DEPENDS ${SHADER}
+        COMMENT "Compiling shader ${FILE_NAME}"
+        VERBATIM
+    )
+
+    list(APPEND COMPILED_SHADERS ${OUTPUT_FILE})
+endforeach()
+
+add_custom_target(compile_shaders ALL
+    DEPENDS ${COMPILED_SHADERS}
+)
+
+add_dependencies(app compile_shaders)

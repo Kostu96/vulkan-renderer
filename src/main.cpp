@@ -1,4 +1,5 @@
-#include "vulkan_utils.hpp"
+#include "vulkan_utils/vulkan_utils.hpp"
+#include "vulkan_utils/instance.hpp"
 
 #define SDL_MAIN_USE_CALLBACKS
 #include <SDL3/SDL.h>
@@ -6,10 +7,13 @@
 #include <SDL3/SDL_vulkan.h>
 
 #include <algorithm>
+#include <fstream>
 #include <iostream>
+#include <memory>
 #include <print>
 #include <ranges>
 #include <vector>
+#include <stdexcept>
 
 #ifdef NDEBUG
     constexpr bool enable_validation_layers = false;
@@ -76,8 +80,23 @@ VkPresentModeKHR choose_swap_present_mode(std::span<const VkPresentModeKHR> pres
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
+std::vector<uint32_t> read_file(const char* filename) {
+    std::ifstream file{ filename, std::ios::binary | std::ios::ate };
+    if (!file.is_open()) {
+        throw std::runtime_error{ "Failed to open file." };
+    }
+
+    size_t file_size = static_cast<size_t>(file.tellg());
+    std::vector<uint32_t> buffer(file_size / sizeof(uint32_t));
+    file.seekg(0, std::ios::beg);
+    file.read(reinterpret_cast<char*>(buffer.data()), file_size);
+    file.close();
+
+    return buffer;
+}
+
 SDL_Window* sdl_window = nullptr;
-VkInstance vk_instance = VK_NULL_HANDLE;
+std::unique_ptr<vkutils::Instance> vk_instance;
 VkDebugUtilsMessengerEXT vk_debug_messenger = VK_NULL_HANDLE;
 VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
 VkPhysicalDevice vk_physical_device = VK_NULL_HANDLE;
@@ -87,6 +106,7 @@ VkQueue vk_queue = VK_NULL_HANDLE;
 VkSwapchainKHR vk_swapchain = VK_NULL_HANDLE;
 std::vector<VkImage> vk_swapchain_images;
 std::vector<VkImageView> vk_swapchain_images_views;
+VkPipeline vk_pipeline;
 
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -103,9 +123,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
 
-    VkResult vk_result;
-
-    vk_result = volkInitialize();
+    VkResult vk_result = volkInitialize();
     if (vk_result != VK_SUCCESS) {
         std::println(std::cerr, "Failed to load Vulkan library.");
         return SDL_APP_FAILURE;
@@ -122,7 +140,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         }
     }
 
-    std::vector<char const*> required_layers;
+    std::vector<const char*> required_layers;
     if (enable_validation_layers) {
         required_layers.push_back("VK_LAYER_KHRONOS_validation");
     }
@@ -138,30 +156,21 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
     
-    VkApplicationInfo application_info = {};
-    application_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    application_info.pApplicationName = "Vulkan Renderer";
-    application_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    application_info.pEngineName = "No Engine";
-    application_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    application_info.apiVersion = VK_API_VERSION_1_4;
+    VkApplicationInfo app_info = {};
+    app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    app_info.pApplicationName = "Vulkan Renderer";
+    app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+    app_info.pEngineName = "No Engine";
+    app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+    app_info.apiVersion = VK_API_VERSION_1_4;
 
-    VkInstanceCreateInfo instance_create_info = {};
-    instance_create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    instance_create_info.pApplicationInfo = &application_info;
-    instance_create_info.enabledExtensionCount = static_cast<uint32_t>(required_extensions.size());
-    instance_create_info.ppEnabledExtensionNames = required_extensions.data();
-    instance_create_info.enabledLayerCount = static_cast<uint32_t>(required_layers.size());
-    instance_create_info.ppEnabledLayerNames = required_layers.data();
-    vkCreateInstance(&instance_create_info, nullptr, &vk_instance);
-    
-    volkLoadInstanceOnly(vk_instance);
+    vk_instance = std::make_unique<vkutils::Instance>(app_info, std::span{ required_extensions }, std::span{ required_layers });
 
     if (enable_validation_layers) {
-        vk_debug_messenger = vkutils::create_debug_messenger(vk_instance, vk_debug_callback);
+        vk_debug_messenger = vkutils::create_debug_messenger(vk_instance->get_handle(), vk_debug_callback);
     }
 
-    if (!SDL_Vulkan_CreateSurface(sdl_window, vk_instance, nullptr, &vk_surface)) {
+    if (!SDL_Vulkan_CreateSurface(sdl_window, vk_instance->get_handle(), nullptr, &vk_surface)) {
         std::println(std::cerr, "Failed to create Vulkan surface");
         return SDL_APP_FAILURE;
     }
@@ -169,7 +178,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     std::vector<const char*> required_device_extensions = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
-    auto physical_devices = vkutils::get_physical_devices(vk_instance);
+    auto physical_devices = vkutils::get_physical_devices(vk_instance->get_handle());
     for (auto& physical_device : physical_devices) {
         // TODO(Kostu): Device scoring
         auto physical_device_props = vkutils::get_physical_device_properties(physical_device);
@@ -181,7 +190,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
 
         bool has_graphics_capable_queue = false;
         for (auto [idx, queue_family] : std::views::enumerate(queue_family_props)) {
-            bool present_supported = SDL_Vulkan_GetPresentationSupport(vk_instance, physical_device, idx);
+            bool present_supported = SDL_Vulkan_GetPresentationSupport(vk_instance->get_handle(), physical_device, idx);
             if ((queue_family.queueFamilyProperties.queueFlags & VK_QUEUE_GRAPHICS_BIT) && present_supported) {
                 has_graphics_capable_queue = true;
                 vk_queue_family_index = static_cast<uint32_t>(idx);
@@ -215,6 +224,15 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     queue_create_info.queueCount = 1;
     queue_create_info.pQueuePriorities = &queue_priority;
 
+    VkPhysicalDeviceVulkan13Features vlk13_features = {};
+    vlk13_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    vlk13_features.dynamicRendering = VK_TRUE;
+
+    VkPhysicalDeviceVulkan11Features vlk11_features = {};
+    vlk11_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    vlk11_features.shaderDrawParameters = VK_TRUE;
+    vlk11_features.pNext = &vlk13_features;
+
     VkDeviceCreateInfo device_create_info = {};
     device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     device_create_info.queueCreateInfoCount = 1;
@@ -223,6 +241,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     device_create_info.ppEnabledExtensionNames = required_device_extensions.data();
     device_create_info.enabledLayerCount = static_cast<uint32_t>(required_layers.size());
     device_create_info.ppEnabledLayerNames = required_layers.data();
+    device_create_info.pNext = &vlk11_features;
     vkCreateDevice(vk_physical_device, &device_create_info, nullptr, &vk_device);
 
     if (vk_device == VK_NULL_HANDLE) {
@@ -289,6 +308,105 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         vk_swapchain_images_views.push_back(view);
     }
 
+    auto shader_code = read_file("shaders/simple.spv");
+    if (shader_code[0] != 0x07230203) {
+        throw std::runtime_error("Not valid SPIR-V");
+    }
+    
+    VkShaderModuleCreateInfo shader_module_create_info = {};
+    shader_module_create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    shader_module_create_info.codeSize = shader_code.size() * sizeof(uint32_t);
+    shader_module_create_info.pCode = shader_code.data();
+    VkShaderModule vk_shader_module;
+    vkCreateShaderModule(vk_device, &shader_module_create_info, nullptr, &vk_shader_module);
+
+    std::vector<VkPipelineShaderStageCreateInfo> stages(2);
+    stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[0].module = vk_shader_module;
+    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    stages[0].pName = "vert_main";
+    stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[1].module = vk_shader_module;
+    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    stages[1].pName = "frag_main";
+
+    std::vector<VkDynamicState> dynamic_states = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR
+    };
+    VkPipelineDynamicStateCreateInfo dynamic_state_create_info = {};
+    dynamic_state_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamic_state_create_info.dynamicStateCount = static_cast<uint32_t>(dynamic_states.size());
+    dynamic_state_create_info.pDynamicStates = dynamic_states.data();
+
+    VkPipelineVertexInputStateCreateInfo vertex_input_create_info = {};
+    vertex_input_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+    VkPipelineInputAssemblyStateCreateInfo input_assembly_create_info = {};
+    input_assembly_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    input_assembly_create_info.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    //VkViewport viewport = { 0.0f, 0.0f, extent.width, extent.height, 0.0f, 1.0f };
+
+    VkPipelineViewportStateCreateInfo viewport_create_info = {};
+    viewport_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewport_create_info.viewportCount = 1;
+    viewport_create_info.scissorCount = 1;
+
+    VkPipelineRasterizationStateCreateInfo rasterization_create_info = {};
+    rasterization_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterization_create_info.depthClampEnable = VK_FALSE;
+    rasterization_create_info.rasterizerDiscardEnable = VK_FALSE;
+    rasterization_create_info.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterization_create_info.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterization_create_info.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    rasterization_create_info.depthBiasEnable = VK_FALSE;
+    rasterization_create_info.depthBiasSlopeFactor = 1.0f;
+    rasterization_create_info.lineWidth = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo multisample_create_info = {};
+    multisample_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisample_create_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisample_create_info.sampleShadingEnable = VK_FALSE;
+
+    VkPipelineColorBlendAttachmentState color_blend_attachment = {};
+    color_blend_attachment.blendEnable = VK_FALSE;
+    color_blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    VkPipelineColorBlendStateCreateInfo color_blend_create_info = {};
+    color_blend_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    color_blend_create_info.logicOpEnable = VK_FALSE;
+    color_blend_create_info.attachmentCount = 1;
+    color_blend_create_info.pAttachments = &color_blend_attachment;
+
+    VkPipelineLayoutCreateInfo layout_create_info = {};
+    layout_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    VkPipelineLayout layout;
+    vkCreatePipelineLayout(vk_device, &layout_create_info, nullptr, &layout);
+
+    VkPipelineRenderingCreateInfo rendering_create_info = {};
+    rendering_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    rendering_create_info.colorAttachmentCount = 1;
+    rendering_create_info.pColorAttachmentFormats = &format.format;
+
+    VkGraphicsPipelineCreateInfo pipeline_create_info = {};
+    pipeline_create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipeline_create_info.stageCount = static_cast<uint32_t>(stages.size());
+    pipeline_create_info.pStages = stages.data();
+    pipeline_create_info.pVertexInputState = &vertex_input_create_info;
+    pipeline_create_info.pInputAssemblyState = &input_assembly_create_info;
+    pipeline_create_info.pViewportState = &viewport_create_info;
+    pipeline_create_info.pRasterizationState = &rasterization_create_info;
+    pipeline_create_info.pMultisampleState = &multisample_create_info;
+    pipeline_create_info.pDynamicState = &dynamic_state_create_info;
+    pipeline_create_info.pColorBlendState = &color_blend_create_info;
+    pipeline_create_info.layout = layout;
+    pipeline_create_info.pNext = &rendering_create_info;
+
+    vkCreateGraphicsPipelines(vk_device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &vk_pipeline);
+
+    vkDestroyPipelineLayout(vk_device, layout, nullptr);
+    vkDestroyShaderModule(vk_device, vk_shader_module, nullptr);
+
     return SDL_APP_CONTINUE;
 }
 
@@ -308,16 +426,17 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 }
 
 void SDL_AppQuit(void* appstate, SDL_AppResult result) {
+    vkDestroyPipeline(vk_device, vk_pipeline, nullptr);
     for (auto& image_view : vk_swapchain_images_views) {
         vkDestroyImageView(vk_device, image_view, nullptr);
     }
     vkDestroySwapchainKHR(vk_device, vk_swapchain, nullptr);
     vkDestroyDevice(vk_device, nullptr);
-    SDL_Vulkan_DestroySurface(vk_instance, vk_surface, nullptr);
+    SDL_Vulkan_DestroySurface(vk_instance->get_handle(), vk_surface, nullptr);
     if (enable_validation_layers) {
-        vkDestroyDebugUtilsMessengerEXT(vk_instance, vk_debug_messenger, nullptr);
+        vkDestroyDebugUtilsMessengerEXT(vk_instance->get_handle(), vk_debug_messenger, nullptr);
     }
-    vkDestroyInstance(vk_instance, nullptr);
+    vk_instance.reset();
 
     SDL_DestroyWindow(sdl_window);
     SDL_Quit();

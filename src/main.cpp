@@ -95,6 +95,31 @@ std::vector<uint32_t> read_file(const char* filename) {
     return buffer;
 }
 
+void transition_image_layout(VkCommandBuffer cmd_buffer,
+                             VkImage image,
+                             VkImageLayout old_layout,
+                             VkImageLayout new_layout,
+                             VkAccessFlags2 src_access,
+                             VkAccessFlags2 dst_access,
+                             VkPipelineStageFlags2 src_stage,
+                             VkPipelineStageFlags2 dst_stage) {
+    VkImageMemoryBarrier2 barrier = {};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    barrier.srcStageMask = src_stage;
+    barrier.srcAccessMask = src_access;
+    barrier.dstStageMask = dst_stage;
+    barrier.dstAccessMask = dst_access;
+    barrier.oldLayout = old_layout;
+    barrier.newLayout = new_layout;
+    barrier.image = image;
+    barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    VkDependencyInfo deps_info = {};
+    deps_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    deps_info.imageMemoryBarrierCount = 1;
+    deps_info.pImageMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(cmd_buffer, &deps_info);
+}
+
 SDL_Window* sdl_window = nullptr;
 std::unique_ptr<vkutils::Instance> vk_instance;
 VkDebugUtilsMessengerEXT vk_debug_messenger = VK_NULL_HANDLE;
@@ -107,6 +132,67 @@ VkSwapchainKHR vk_swapchain = VK_NULL_HANDLE;
 std::vector<VkImage> vk_swapchain_images;
 std::vector<VkImageView> vk_swapchain_images_views;
 VkPipeline vk_pipeline;
+VkCommandPool vk_cmd_pool;
+VkCommandBuffer vk_cmd_buffer;
+std::vector<VkSemaphore> vk_present_semaphores;
+VkSemaphore vk_render_semaphore;
+VkFence vk_draw_fence;
+VkExtent2D vk_extent;
+
+void record_cmd_buffer(uint32_t image_index) {
+    VkCommandBufferBeginInfo cmd_buffer_begin_info = {};
+    cmd_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    vkBeginCommandBuffer(vk_cmd_buffer, &cmd_buffer_begin_info);
+
+    transition_image_layout(vk_cmd_buffer,
+                            vk_swapchain_images[image_index],
+                            VK_IMAGE_LAYOUT_UNDEFINED,
+                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                            {},
+                            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+
+    VkClearValue clear_color;
+    clear_color.color = { 0.0f, 0.0f, 0.0f, 1.0f };
+    VkRenderingAttachmentInfo attachment_info = {};
+    attachment_info.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    attachment_info.imageView = vk_swapchain_images_views[image_index];
+    attachment_info.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    attachment_info.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachment_info.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachment_info.clearValue = clear_color;
+
+    VkRenderingInfo rendering_info = {};
+    rendering_info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    rendering_info.renderArea = { .offset = { 0, 0 }, .extent = vk_extent };
+    rendering_info.layerCount = 1;
+    rendering_info.colorAttachmentCount = 1;
+    rendering_info.pColorAttachments = &attachment_info;
+    vkCmdBeginRendering(vk_cmd_buffer, &rendering_info);
+
+    vkCmdBindPipeline(vk_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipeline);
+    
+    VkViewport viewport = { 0.0f, 0.0f, static_cast<float>(vk_extent.width), static_cast<float>(vk_extent.height), 0.0f, 1.0f };
+    vkCmdSetViewport(vk_cmd_buffer, 0, 1, &viewport);
+    VkRect2D scissor = { { 0, 0 }, vk_extent };
+    vkCmdSetScissor(vk_cmd_buffer, 0, 1, &scissor);
+
+    vkCmdDraw(vk_cmd_buffer, 3, 1, 0, 0);
+
+    vkCmdEndRendering(vk_cmd_buffer);
+    
+    transition_image_layout(vk_cmd_buffer,
+                            vk_swapchain_images[image_index],
+                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                            {},
+                            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                            VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT);
+
+    vkEndCommandBuffer(vk_cmd_buffer);
+}
 
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -227,6 +313,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     VkPhysicalDeviceVulkan13Features vlk13_features = {};
     vlk13_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     vlk13_features.dynamicRendering = VK_TRUE;
+    vlk13_features.synchronization2 = VK_TRUE;
 
     VkPhysicalDeviceVulkan11Features vlk11_features = {};
     vlk11_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
@@ -266,7 +353,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     auto surface_formats = vkutils::get_physical_device_surface_formats(vk_physical_device, vk_surface);
     auto surface_present_modes = vkutils::get_physical_device_surface_present_modes(vk_physical_device, vk_surface);
 
-    auto extent = choose_swap_extent(sdl_window, surface_caps);
+    vk_extent = choose_swap_extent(sdl_window, surface_caps);
     auto format = choose_swap_surface_format(surface_formats);
     auto present_mode = choose_swap_present_mode(surface_present_modes);
 
@@ -279,7 +366,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     swapchain_create_info.minImageCount = swap_image_count;
     swapchain_create_info.imageFormat = format.format;
     swapchain_create_info.imageColorSpace = format.colorSpace;
-    swapchain_create_info.imageExtent = extent;
+    swapchain_create_info.imageExtent = vk_extent;
     swapchain_create_info.imageArrayLayers = 1;
     swapchain_create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     swapchain_create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -346,8 +433,6 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     input_assembly_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     input_assembly_create_info.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
-    //VkViewport viewport = { 0.0f, 0.0f, extent.width, extent.height, 0.0f, 1.0f };
-
     VkPipelineViewportStateCreateInfo viewport_create_info = {};
     viewport_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     viewport_create_info.viewportCount = 1;
@@ -401,11 +486,36 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     pipeline_create_info.pColorBlendState = &color_blend_create_info;
     pipeline_create_info.layout = layout;
     pipeline_create_info.pNext = &rendering_create_info;
-
     vkCreateGraphicsPipelines(vk_device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &vk_pipeline);
 
     vkDestroyPipelineLayout(vk_device, layout, nullptr);
     vkDestroyShaderModule(vk_device, vk_shader_module, nullptr);
+
+    VkCommandPoolCreateInfo cmd_pool_create_info = {};
+    cmd_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    cmd_pool_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    cmd_pool_create_info.queueFamilyIndex = vk_queue_family_index;
+    vkCreateCommandPool(vk_device, &cmd_pool_create_info, nullptr, &vk_cmd_pool);
+
+    VkCommandBufferAllocateInfo cmd_buffer_alloc_info = {};
+    cmd_buffer_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmd_buffer_alloc_info.commandPool = vk_cmd_pool;
+    cmd_buffer_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmd_buffer_alloc_info.commandBufferCount = 1;
+    vkAllocateCommandBuffers(vk_device, &cmd_buffer_alloc_info, &vk_cmd_buffer);
+
+    VkSemaphoreCreateInfo semaphore_create_info = {};
+    semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    vkCreateSemaphore(vk_device, &semaphore_create_info, nullptr, &vk_render_semaphore);
+    vk_present_semaphores.resize(vk_swapchain_images.size());
+    for (auto& semaphore : vk_present_semaphores) {
+        vkCreateSemaphore(vk_device, &semaphore_create_info, nullptr, &semaphore);
+    }
+
+    VkFenceCreateInfo fence_create_info = {};
+    fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    vkCreateFence(vk_device, &fence_create_info, nullptr, &vk_draw_fence);
 
     return SDL_APP_CONTINUE;
 }
@@ -421,11 +531,49 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 }
 
 SDL_AppResult SDL_AppIterate(void* appstate) {
-    SDL_Delay(16);
+    vkWaitForFences(vk_device, 1, &vk_draw_fence, VK_TRUE, std::numeric_limits<uint64_t>::max());
+
+    uint32_t image_index = 0;
+    vkAcquireNextImageKHR(vk_device, vk_swapchain, std::numeric_limits<uint64_t>::max(), vk_present_semaphores[0], VK_NULL_HANDLE, &image_index);
+
+    record_cmd_buffer(image_index);
+
+    vkResetFences(vk_device, 1, &vk_draw_fence);
+
+    VkPipelineStageFlags wait_destination_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSubmitInfo submit_info = {};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.waitSemaphoreCount = 1;
+    submit_info.pWaitSemaphores = &vk_present_semaphores[image_index];
+    submit_info.pWaitDstStageMask = &wait_destination_stage;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &vk_cmd_buffer;
+    submit_info.signalSemaphoreCount = 1;
+    submit_info.pSignalSemaphores = &vk_render_semaphore;
+    vkQueueSubmit(vk_queue, 1, &submit_info, vk_draw_fence);
+
+    VkPresentInfoKHR present_info = {};
+    present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    present_info.waitSemaphoreCount = 1;
+    present_info.pWaitSemaphores = &vk_render_semaphore;
+    present_info.swapchainCount = 1;
+    present_info.pSwapchains = &vk_swapchain;
+    present_info.pImageIndices = &image_index;
+    vkQueuePresentKHR(vk_queue, &present_info);
+
     return SDL_APP_CONTINUE;
 }
 
 void SDL_AppQuit(void* appstate, SDL_AppResult result) {
+    vkDeviceWaitIdle(vk_device);
+
+    vkDestroyFence(vk_device, vk_draw_fence, nullptr);
+    for (auto& semaphore : vk_present_semaphores) {
+        vkDestroySemaphore(vk_device, semaphore, nullptr);
+    }
+    vkDestroySemaphore(vk_device, vk_render_semaphore, nullptr);
+    vkFreeCommandBuffers(vk_device, vk_cmd_pool, 1, &vk_cmd_buffer);
+    vkDestroyCommandPool(vk_device, vk_cmd_pool, nullptr);
     vkDestroyPipeline(vk_device, vk_pipeline, nullptr);
     for (auto& image_view : vk_swapchain_images_views) {
         vkDestroyImageView(vk_device, image_view, nullptr);

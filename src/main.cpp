@@ -1,5 +1,6 @@
 #include "vulkan_utils/vulkan_utils.hpp"
 #include "vulkan_utils/instance.hpp"
+#include "vulkan_utils/device.hpp"
 
 #define SDL_MAIN_USE_CALLBACKS
 #include <SDL3/SDL.h>
@@ -126,7 +127,7 @@ VkDebugUtilsMessengerEXT vk_debug_messenger = VK_NULL_HANDLE;
 VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
 VkPhysicalDevice vk_physical_device = VK_NULL_HANDLE;
 uint32_t vk_queue_family_index = 0;
-VkDevice vk_device = VK_NULL_HANDLE;
+std::unique_ptr<vkutils::Device> vk_device;
 VkQueue vk_queue = VK_NULL_HANDLE;
 VkSwapchainKHR vk_swapchain = VK_NULL_HANDLE;
 std::vector<VkImage> vk_swapchain_images;
@@ -320,29 +321,13 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     vlk11_features.shaderDrawParameters = VK_TRUE;
     vlk11_features.pNext = &vlk13_features;
 
-    VkDeviceCreateInfo device_create_info = {};
-    device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    device_create_info.queueCreateInfoCount = 1;
-    device_create_info.pQueueCreateInfos = &queue_create_info;
-    device_create_info.enabledExtensionCount = static_cast<uint32_t>(required_device_extensions.size());
-    device_create_info.ppEnabledExtensionNames = required_device_extensions.data();
-    device_create_info.enabledLayerCount = static_cast<uint32_t>(required_layers.size());
-    device_create_info.ppEnabledLayerNames = required_layers.data();
-    device_create_info.pNext = &vlk11_features;
-    vkCreateDevice(vk_physical_device, &device_create_info, nullptr, &vk_device);
-
-    if (vk_device == VK_NULL_HANDLE) {
-        std::println(std::cerr, "Failed to create Vulkan device.");
-        return SDL_APP_FAILURE;
-    }
-
-    volkLoadDevice(vk_device);
+    vk_device = std::make_unique<vkutils::Device>(vk_physical_device, std::span{ &queue_create_info, 1 }, required_device_extensions, required_layers, &vlk11_features);
 
     VkDeviceQueueInfo2 queue_info = {};
     queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2;
     queue_info.queueFamilyIndex = vk_queue_family_index;
     queue_info.queueIndex = 0;
-    vkGetDeviceQueue2(vk_device, &queue_info, &vk_queue);
+    vkGetDeviceQueue2(vk_device->get_handle(), &queue_info, &vk_queue);
 
     if (vk_queue == VK_NULL_HANDLE) {
         std::println(std::cerr, "Failed to retrieve Vulkan queue.");
@@ -375,12 +360,12 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     swapchain_create_info.presentMode = present_mode;
     swapchain_create_info.clipped = VK_TRUE;
     swapchain_create_info.oldSwapchain = VK_NULL_HANDLE;
-    vkCreateSwapchainKHR(vk_device, &swapchain_create_info, nullptr, &vk_swapchain);
+    vkCreateSwapchainKHR(vk_device->get_handle(), &swapchain_create_info, nullptr, &vk_swapchain);
 
     uint32_t images_count = 0;
-    vkGetSwapchainImagesKHR(vk_device, vk_swapchain, &images_count, nullptr);
+    vkGetSwapchainImagesKHR(vk_device->get_handle(), vk_swapchain, &images_count, nullptr);
     vk_swapchain_images.resize(images_count);
-    vkGetSwapchainImagesKHR(vk_device, vk_swapchain, &images_count, vk_swapchain_images.data());
+    vkGetSwapchainImagesKHR(vk_device->get_handle(), vk_swapchain, &images_count, vk_swapchain_images.data());
 
     VkImageViewCreateInfo image_view_create_info = {};
     image_view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -391,7 +376,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     for (auto image : vk_swapchain_images) {
         image_view_create_info.image = image;
         VkImageView view;
-        vkCreateImageView(vk_device, &image_view_create_info, nullptr, &view);
+        vkCreateImageView(vk_device->get_handle(), &image_view_create_info, nullptr, &view);
         vk_swapchain_images_views.push_back(view);
     }
 
@@ -405,7 +390,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     shader_module_create_info.codeSize = shader_code.size() * sizeof(uint32_t);
     shader_module_create_info.pCode = shader_code.data();
     VkShaderModule vk_shader_module;
-    vkCreateShaderModule(vk_device, &shader_module_create_info, nullptr, &vk_shader_module);
+    vkCreateShaderModule(vk_device->get_handle(), &shader_module_create_info, nullptr, &vk_shader_module);
 
     std::vector<VkPipelineShaderStageCreateInfo> stages(2);
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -466,7 +451,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     VkPipelineLayoutCreateInfo layout_create_info = {};
     layout_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     VkPipelineLayout layout;
-    vkCreatePipelineLayout(vk_device, &layout_create_info, nullptr, &layout);
+    vkCreatePipelineLayout(vk_device->get_handle(), &layout_create_info, nullptr, &layout);
 
     VkPipelineRenderingCreateInfo rendering_create_info = {};
     rendering_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
@@ -486,36 +471,36 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     pipeline_create_info.pColorBlendState = &color_blend_create_info;
     pipeline_create_info.layout = layout;
     pipeline_create_info.pNext = &rendering_create_info;
-    vkCreateGraphicsPipelines(vk_device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &vk_pipeline);
+    vkCreateGraphicsPipelines(vk_device->get_handle(), VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &vk_pipeline);
 
-    vkDestroyPipelineLayout(vk_device, layout, nullptr);
-    vkDestroyShaderModule(vk_device, vk_shader_module, nullptr);
+    vkDestroyPipelineLayout(vk_device->get_handle(), layout, nullptr);
+    vkDestroyShaderModule(vk_device->get_handle(), vk_shader_module, nullptr);
 
     VkCommandPoolCreateInfo cmd_pool_create_info = {};
     cmd_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     cmd_pool_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     cmd_pool_create_info.queueFamilyIndex = vk_queue_family_index;
-    vkCreateCommandPool(vk_device, &cmd_pool_create_info, nullptr, &vk_cmd_pool);
+    vkCreateCommandPool(vk_device->get_handle(), &cmd_pool_create_info, nullptr, &vk_cmd_pool);
 
     VkCommandBufferAllocateInfo cmd_buffer_alloc_info = {};
     cmd_buffer_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     cmd_buffer_alloc_info.commandPool = vk_cmd_pool;
     cmd_buffer_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     cmd_buffer_alloc_info.commandBufferCount = 1;
-    vkAllocateCommandBuffers(vk_device, &cmd_buffer_alloc_info, &vk_cmd_buffer);
+    vkAllocateCommandBuffers(vk_device->get_handle(), &cmd_buffer_alloc_info, &vk_cmd_buffer);
 
     VkSemaphoreCreateInfo semaphore_create_info = {};
     semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    vkCreateSemaphore(vk_device, &semaphore_create_info, nullptr, &vk_render_semaphore);
+    vkCreateSemaphore(vk_device->get_handle(), &semaphore_create_info, nullptr, &vk_render_semaphore);
     vk_present_semaphores.resize(vk_swapchain_images.size());
     for (auto& semaphore : vk_present_semaphores) {
-        vkCreateSemaphore(vk_device, &semaphore_create_info, nullptr, &semaphore);
+        vkCreateSemaphore(vk_device->get_handle(), &semaphore_create_info, nullptr, &semaphore);
     }
 
     VkFenceCreateInfo fence_create_info = {};
     fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    vkCreateFence(vk_device, &fence_create_info, nullptr, &vk_draw_fence);
+    vkCreateFence(vk_device->get_handle(), &fence_create_info, nullptr, &vk_draw_fence);
 
     return SDL_APP_CONTINUE;
 }
@@ -531,14 +516,14 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 }
 
 SDL_AppResult SDL_AppIterate(void* appstate) {
-    vkWaitForFences(vk_device, 1, &vk_draw_fence, VK_TRUE, std::numeric_limits<uint64_t>::max());
+    vkWaitForFences(vk_device->get_handle(), 1, &vk_draw_fence, VK_TRUE, std::numeric_limits<uint64_t>::max());
 
     uint32_t image_index = 0;
-    vkAcquireNextImageKHR(vk_device, vk_swapchain, std::numeric_limits<uint64_t>::max(), vk_present_semaphores[0], VK_NULL_HANDLE, &image_index);
+    vkAcquireNextImageKHR(vk_device->get_handle(), vk_swapchain, std::numeric_limits<uint64_t>::max(), vk_present_semaphores[0], VK_NULL_HANDLE, &image_index);
 
     record_cmd_buffer(image_index);
 
-    vkResetFences(vk_device, 1, &vk_draw_fence);
+    vkResetFences(vk_device->get_handle(), 1, &vk_draw_fence);
 
     VkPipelineStageFlags wait_destination_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo submit_info = {};
@@ -565,21 +550,21 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 }
 
 void SDL_AppQuit(void* appstate, SDL_AppResult result) {
-    vkDeviceWaitIdle(vk_device);
+    vkDeviceWaitIdle(vk_device->get_handle());
 
-    vkDestroyFence(vk_device, vk_draw_fence, nullptr);
+    vkDestroyFence(vk_device->get_handle(), vk_draw_fence, nullptr);
     for (auto& semaphore : vk_present_semaphores) {
-        vkDestroySemaphore(vk_device, semaphore, nullptr);
+        vkDestroySemaphore(vk_device->get_handle(), semaphore, nullptr);
     }
-    vkDestroySemaphore(vk_device, vk_render_semaphore, nullptr);
-    vkFreeCommandBuffers(vk_device, vk_cmd_pool, 1, &vk_cmd_buffer);
-    vkDestroyCommandPool(vk_device, vk_cmd_pool, nullptr);
-    vkDestroyPipeline(vk_device, vk_pipeline, nullptr);
+    vkDestroySemaphore(vk_device->get_handle(), vk_render_semaphore, nullptr);
+    vkFreeCommandBuffers(vk_device->get_handle(), vk_cmd_pool, 1, &vk_cmd_buffer);
+    vkDestroyCommandPool(vk_device->get_handle(), vk_cmd_pool, nullptr);
+    vkDestroyPipeline(vk_device->get_handle(), vk_pipeline, nullptr);
     for (auto& image_view : vk_swapchain_images_views) {
-        vkDestroyImageView(vk_device, image_view, nullptr);
+        vkDestroyImageView(vk_device->get_handle(), image_view, nullptr);
     }
-    vkDestroySwapchainKHR(vk_device, vk_swapchain, nullptr);
-    vkDestroyDevice(vk_device, nullptr);
+    vkDestroySwapchainKHR(vk_device->get_handle(), vk_swapchain, nullptr);
+    vk_device.reset();
     SDL_Vulkan_DestroySurface(vk_instance->get_handle(), vk_surface, nullptr);
     if (enable_validation_layers) {
         vkDestroyDebugUtilsMessengerEXT(vk_instance->get_handle(), vk_debug_messenger, nullptr);

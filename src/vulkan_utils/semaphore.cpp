@@ -10,13 +10,13 @@ Semaphore::Semaphore(const Device& device) :
 {
     VkSemaphoreCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    VkResult result = vkCreateSemaphore(device.get_handle(), &create_info, nullptr, &handle_);
+    VkResult result = vkCreateSemaphore(device, &create_info, nullptr, &handle_);
     if (result != VK_SUCCESS) {
         throw std::runtime_error{ "Failed to create Vulkan semaphore." };
     }
 }
 
-Semaphore::Semaphore(Semaphore &&other) :
+Semaphore::Semaphore(Semaphore &&other) noexcept :
     device_{ other.device_ },
     handle_{ other.handle_ }
 {
@@ -24,7 +24,7 @@ Semaphore::Semaphore(Semaphore &&other) :
 }
 
 Semaphore::~Semaphore() {
-    vkDestroySemaphore(device_.get_handle(), handle_, nullptr);
+    vkDestroySemaphore(device_, handle_, nullptr);
 }
 
 }

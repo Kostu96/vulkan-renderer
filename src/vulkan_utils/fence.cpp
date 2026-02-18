@@ -13,13 +13,13 @@ Fence::Fence(const Device& device, bool signaled) :
     if (signaled) {
         create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     }
-    VkResult result = vkCreateFence(device.get_handle(), &create_info, nullptr, &handle_);
+    VkResult result = vkCreateFence(device, &create_info, nullptr, &handle_);
     if (result != VK_SUCCESS) {
         throw std::runtime_error{ "Failed to create Vulkan fence." };
     }
 }
 
-Fence::Fence(Fence &&other) :
+Fence::Fence(Fence &&other) noexcept :
     device_{ other.device_ },
     handle_{ other.handle_ }
 {
@@ -27,7 +27,7 @@ Fence::Fence(Fence &&other) :
 }
 
 Fence::~Fence() {
-    vkDestroyFence(device_.get_handle(), handle_, nullptr);
+    vkDestroyFence(device_, handle_, nullptr);
 }
 
 }

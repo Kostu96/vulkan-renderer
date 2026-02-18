@@ -3,8 +3,6 @@
 
 #include <volk/volk.h>
 
-#include <span>
-
 namespace vkutils {
 
 class Device;
@@ -14,13 +12,13 @@ class Fence final :
 public:
     explicit Fence(const Device& device, bool signaled = false);
     
-    Fence(Fence&& other);
+    Fence(Fence&& other) noexcept;
 
     ~Fence();
 
-    VkFence get_handle() const { return handle_; }
+    VkFence* ptr() noexcept { return &handle_; }
 
-    VkFence* operator&() { return std::addressof(handle_); }
+    operator VkFence() const noexcept { return handle_; }
 private:
     const Device& device_;
     VkFence handle_ = VK_NULL_HANDLE;

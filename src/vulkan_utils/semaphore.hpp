@@ -3,8 +3,6 @@
 
 #include <volk/volk.h>
 
-#include <span>
-
 namespace vkutils {
 
 class Device;
@@ -14,13 +12,13 @@ class Semaphore final :
 public:
     explicit Semaphore(const Device& device);
     
-    Semaphore(Semaphore&& other);
+    Semaphore(Semaphore&& other) noexcept;
 
     ~Semaphore();
 
-    VkSemaphore get_handle() const { return handle_; }
+    VkSemaphore* ptr() noexcept { return &handle_; }
 
-    VkSemaphore* operator&() { return std::addressof(handle_); }
+    operator VkSemaphore() const noexcept { return handle_; }
 private:
     const Device& device_;
     VkSemaphore handle_ = VK_NULL_HANDLE;

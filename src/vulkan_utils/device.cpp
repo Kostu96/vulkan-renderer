@@ -7,7 +7,9 @@ namespace vkutils {
 Device::Device(VkPhysicalDevice physical_device,
                std::span<VkDeviceQueueCreateInfo> queues,
                std::span<const char*> extensions,
-               const void* next) {
+               const void* next) :
+    physical_device_{ physical_device }
+{
     VkDeviceCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     create_info.queueCreateInfoCount = static_cast<uint32_t>(queues.size());;

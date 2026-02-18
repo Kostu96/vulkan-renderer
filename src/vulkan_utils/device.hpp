@@ -17,8 +17,11 @@ public:
 
     ~Device();
 
-    VkDevice get_handle() const { return handle_; }
+    VkPhysicalDevice get_physical_device() const { return physical_device_; }
+
+    operator VkDevice() const noexcept { return handle_; }
 private:
+    VkPhysicalDevice physical_device_ = VK_NULL_HANDLE;
     VkDevice handle_ = VK_NULL_HANDLE;
 };
 

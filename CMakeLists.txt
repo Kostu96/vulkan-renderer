@@ -20,10 +20,14 @@ add_executable(app
     src/vulkan_utils/instance.hpp
     src/vulkan_utils/semaphore.cpp
     src/vulkan_utils/semaphore.hpp
+    src/vulkan_utils/swapchain.cpp
+    src/vulkan_utils/swapchain.hpp
     src/vulkan_utils/volk.cpp
     src/vulkan_utils/vulkan_utils.cpp
     src/vulkan_utils/vulkan_utils.hpp
     src/main.cpp
+    src/SDL_surface.cpp
+    src/SDL_surface.hpp
 )
 
 target_compile_features(app PRIVATE cxx_std_23)

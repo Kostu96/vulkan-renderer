@@ -9,7 +9,7 @@ namespace vkutils {
 
 class Device;
 
-class Semaphore :
+class Semaphore final :
     NonCopyable {
 public:
     explicit Semaphore(const Device& device);

@@ -1,4 +1,5 @@
 #include "vulkan_utils/device.hpp"
+#include "vulkan_utils/fence.hpp"
 #include "vulkan_utils/instance.hpp"
 #include "vulkan_utils/semaphore.hpp"
 #include "vulkan_utils/vulkan_utils.hpp"
@@ -18,12 +19,6 @@
 #include <vector>
 #include <stdexcept>
 
-#ifdef NDEBUG
-    constexpr bool enable_validation_layers = false;
-#else
-    constexpr bool enable_validation_layers = true;
-#endif
-
 constexpr int FRAMES_IN_FLIGHT = 2;
 
 std::vector<const char*> get_required_extensions() {
@@ -35,20 +30,11 @@ std::vector<const char*> get_required_extensions() {
         extensions[i] = sdl_vk_extensions[i];
     }
 
-    if (enable_validation_layers) {
-        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    }
+#ifndef NDEBUG
+    extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+#endif
 
     return extensions;
-}
-
-VKAPI_ATTR VkBool32 VKAPI_CALL
-vk_debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
-                  VkDebugUtilsMessageTypeFlagsEXT message_type,
-                  const VkDebugUtilsMessengerCallbackDataEXT* callback_data,
-                  void* user_data) {
-    std::println(std::cerr, "Vulkan debug callback: {}.", callback_data->pMessage);
-    return VK_FALSE;
 }
 
 VkExtent2D choose_swap_extent(SDL_Window* window, const VkSurfaceCapabilitiesKHR& capabilities) {
@@ -127,7 +113,6 @@ void transition_image_layout(VkCommandBuffer cmd_buffer,
 
 SDL_Window* sdl_window = nullptr;
 std::unique_ptr<vkutils::Instance> vk_instance;
-VkDebugUtilsMessengerEXT vk_debug_messenger = VK_NULL_HANDLE;
 VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
 VkPhysicalDevice vk_physical_device = VK_NULL_HANDLE;
 uint32_t vk_queue_family_index = 0;
@@ -141,7 +126,7 @@ VkCommandPool vk_cmd_pool;
 std::array<VkCommandBuffer, FRAMES_IN_FLIGHT> vk_cmd_buffers;
 std::vector<vkutils::Semaphore> vk_present_semaphores;
 std::vector<vkutils::Semaphore> vk_render_semaphores;
-std::array<VkFence, FRAMES_IN_FLIGHT> vk_draw_fences;
+std::vector<vkutils::Fence> vk_draw_fences;
 VkExtent2D vk_extent;
 uint32_t frame_index = 0;
 
@@ -235,9 +220,9 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     }
 
     std::vector<const char*> required_layers;
-    if (enable_validation_layers) {
-        required_layers.push_back("VK_LAYER_KHRONOS_validation");
-    }
+#ifndef NDEBUG
+    required_layers.push_back("VK_LAYER_KHRONOS_validation");
+#endif
 
     auto instance_layer_props = vkutils::get_instance_layer_properties();
 
@@ -259,10 +244,6 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     app_info.apiVersion = VK_API_VERSION_1_4;
 
     vk_instance = std::make_unique<vkutils::Instance>(app_info, std::span{ required_extensions }, std::span{ required_layers });
-
-    if (enable_validation_layers) {
-        vk_debug_messenger = vkutils::create_debug_messenger(vk_instance->get_handle(), vk_debug_callback);
-    }
 
     if (!SDL_Vulkan_CreateSurface(sdl_window, vk_instance->get_handle(), nullptr, &vk_surface)) {
         std::println(std::cerr, "Failed to create Vulkan surface");
@@ -328,7 +309,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     vlk11_features.shaderDrawParameters = VK_TRUE;
     vlk11_features.pNext = &vlk13_features;
 
-    vk_device = std::make_unique<vkutils::Device>(vk_physical_device, std::span{ &queue_create_info, 1 }, required_device_extensions, required_layers, &vlk11_features);
+    vk_device = std::make_unique<vkutils::Device>(vk_physical_device, std::span{ &queue_create_info, 1 }, required_device_extensions, &vlk11_features);
 
     VkDeviceQueueInfo2 queue_info = {};
     queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2;
@@ -496,18 +477,12 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     cmd_buffer_alloc_info.commandBufferCount = FRAMES_IN_FLIGHT;
     vkAllocateCommandBuffers(vk_device->get_handle(), &cmd_buffer_alloc_info, vk_cmd_buffers.data());
 
-    for (int i = 0; i < FRAMES_IN_FLIGHT; ++i) {
-        vk_present_semaphores.emplace_back(*vk_device);
-    }
     for (int i = 0; i < vk_swapchain_images.size(); ++i) {
         vk_render_semaphores.emplace_back(*vk_device);
     }
-
-    VkFenceCreateInfo fence_create_info = {};
-    fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    for (auto& fence : vk_draw_fences) {
-        vkCreateFence(vk_device->get_handle(), &fence_create_info, nullptr, &fence);
+    for (int i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+        vk_present_semaphores.emplace_back(*vk_device);
+        vk_draw_fences.emplace_back(*vk_device, true);
     }
 
     return SDL_APP_CONTINUE;
@@ -543,7 +518,7 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
     submit_info.pCommandBuffers = &vk_cmd_buffers[frame_index];
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores = &vk_render_semaphores[image_index];
-    vkQueueSubmit(vk_queue, 1, &submit_info, vk_draw_fences[frame_index]);
+    vkQueueSubmit(vk_queue, 1, &submit_info, vk_draw_fences[frame_index].get_handle());
 
     VkPresentInfoKHR present_info = {};
     present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -562,11 +537,9 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 void SDL_AppQuit(void* appstate, SDL_AppResult result) {
     vkDeviceWaitIdle(vk_device->get_handle());
 
-    for (auto& fence : vk_draw_fences) {
-        vkDestroyFence(vk_device->get_handle(), fence, nullptr);
-    }
     vk_render_semaphores.clear();
     vk_present_semaphores.clear();
+    vk_draw_fences.clear();
     vkFreeCommandBuffers(vk_device->get_handle(), vk_cmd_pool, static_cast<uint32_t>(vk_cmd_buffers.size()), vk_cmd_buffers.data());
     vkDestroyCommandPool(vk_device->get_handle(), vk_cmd_pool, nullptr);
     vkDestroyPipeline(vk_device->get_handle(), vk_pipeline, nullptr);
@@ -576,9 +549,6 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result) {
     vkDestroySwapchainKHR(vk_device->get_handle(), vk_swapchain, nullptr);
     vk_device.reset();
     SDL_Vulkan_DestroySurface(vk_instance->get_handle(), vk_surface, nullptr);
-    if (enable_validation_layers) {
-        vkDestroyDebugUtilsMessengerEXT(vk_instance->get_handle(), vk_debug_messenger, nullptr);
-    }
     vk_instance.reset();
 
     SDL_DestroyWindow(sdl_window);

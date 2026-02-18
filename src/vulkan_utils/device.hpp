@@ -7,13 +7,12 @@
 
 namespace vkutils {
 
-class Device :
+class Device final :
     NonCopyable {
 public:
     Device(VkPhysicalDevice physical_device,
            std::span<VkDeviceQueueCreateInfo> queues,
            std::span<const char*> extensions,
-           std::span<const char*> layers,
            const void* next = nullptr);
 
     ~Device();

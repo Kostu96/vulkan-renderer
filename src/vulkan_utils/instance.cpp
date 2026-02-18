@@ -1,6 +1,24 @@
 #include "vulkan_utils/instance.hpp"
+#include "vulkan_utils/vulkan_utils.hpp"
 
+#include <algorithm>
+#include <iostream>
+#include <print>
 #include <stdexcept>
+#include <string.h>
+
+namespace {
+
+VKAPI_ATTR VkBool32 VKAPI_CALL
+dbg_callback(VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
+             VkDebugUtilsMessageTypeFlagsEXT message_type,
+             const VkDebugUtilsMessengerCallbackDataEXT* callback_data,
+             void* user_data) {
+    std::println(std::cerr, "Vulkan debug callback: {}.", callback_data->pMessage);
+    return VK_FALSE;
+}
+
+}
 
 namespace vkutils {
 
@@ -20,9 +38,15 @@ Instance::Instance(const VkApplicationInfo& app_info,
     }
     
     volkLoadInstanceOnly(handle_);
+
+    if (std::ranges::any_of(extensions,
+                            [](auto& extension) { return strcmp(extension, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0; })) {
+        dbg_messenger_ = vkutils::create_debug_messenger(handle_, dbg_callback);
+    }
 }
 
 Instance::~Instance() {
+    vkDestroyDebugUtilsMessengerEXT(handle_, dbg_messenger_, nullptr);
     vkDestroyInstance(handle_, nullptr);
 }
 

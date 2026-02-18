@@ -19,6 +19,7 @@ public:
     VkInstance get_handle() { return handle_; }
 private:
     VkInstance handle_ = VK_NULL_HANDLE;
+    VkDebugUtilsMessengerEXT dbg_messenger_ = VK_NULL_HANDLE;
 };
 
 }

@@ -14,6 +14,8 @@ add_executable(app
     src/utils/non_copyable.hpp
     src/vulkan_utils/device.cpp
     src/vulkan_utils/device.hpp
+    src/vulkan_utils/fence.cpp
+    src/vulkan_utils/fence.hpp
     src/vulkan_utils/instance.cpp
     src/vulkan_utils/instance.hpp
     src/vulkan_utils/semaphore.cpp

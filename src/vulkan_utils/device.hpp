@@ -1,11 +1,14 @@
 #pragma once
+#include "utils/non_copyable.hpp"
+
 #include <volk/volk.h>
 
 #include <span>
 
 namespace vkutils {
 
-class Device {
+class Device :
+    NonCopyable {
 public:
     Device(VkPhysicalDevice physical_device,
            std::span<VkDeviceQueueCreateInfo> queues,
@@ -15,7 +18,7 @@ public:
 
     ~Device();
 
-    VkDevice get_handle() { return handle_; }
+    VkDevice get_handle() const { return handle_; }
 private:
     VkDevice handle_ = VK_NULL_HANDLE;
 };

@@ -11,10 +11,13 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 find_package (Vulkan REQUIRED)
 
 add_executable(app
+    src/utils/non_copyable.hpp
     src/vulkan_utils/device.cpp
     src/vulkan_utils/device.hpp
     src/vulkan_utils/instance.cpp
     src/vulkan_utils/instance.hpp
+    src/vulkan_utils/semaphore.cpp
+    src/vulkan_utils/semaphore.hpp
     src/vulkan_utils/volk.cpp
     src/vulkan_utils/vulkan_utils.cpp
     src/vulkan_utils/vulkan_utils.hpp

@@ -1,6 +1,7 @@
-#include "vulkan_utils/vulkan_utils.hpp"
-#include "vulkan_utils/instance.hpp"
 #include "vulkan_utils/device.hpp"
+#include "vulkan_utils/instance.hpp"
+#include "vulkan_utils/semaphore.hpp"
+#include "vulkan_utils/vulkan_utils.hpp"
 
 #define SDL_MAIN_USE_CALLBACKS
 #include <SDL3/SDL.h>
@@ -8,6 +9,7 @@
 #include <SDL3/SDL_vulkan.h>
 
 #include <algorithm>
+#include <array>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -21,6 +23,8 @@
 #else
     constexpr bool enable_validation_layers = true;
 #endif
+
+constexpr int FRAMES_IN_FLIGHT = 2;
 
 std::vector<const char*> get_required_extensions() {
     uint32_t sdl_vk_extensions_count = 0;
@@ -134,18 +138,21 @@ std::vector<VkImage> vk_swapchain_images;
 std::vector<VkImageView> vk_swapchain_images_views;
 VkPipeline vk_pipeline;
 VkCommandPool vk_cmd_pool;
-VkCommandBuffer vk_cmd_buffer;
-std::vector<VkSemaphore> vk_present_semaphores;
-VkSemaphore vk_render_semaphore;
-VkFence vk_draw_fence;
+std::array<VkCommandBuffer, FRAMES_IN_FLIGHT> vk_cmd_buffers;
+std::vector<vkutils::Semaphore> vk_present_semaphores;
+std::vector<vkutils::Semaphore> vk_render_semaphores;
+std::array<VkFence, FRAMES_IN_FLIGHT> vk_draw_fences;
 VkExtent2D vk_extent;
+uint32_t frame_index = 0;
 
 void record_cmd_buffer(uint32_t image_index) {
+    VkCommandBuffer cmd_buffer = vk_cmd_buffers[frame_index];
+
     VkCommandBufferBeginInfo cmd_buffer_begin_info = {};
     cmd_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    vkBeginCommandBuffer(vk_cmd_buffer, &cmd_buffer_begin_info);
+    vkBeginCommandBuffer(cmd_buffer, &cmd_buffer_begin_info);
 
-    transition_image_layout(vk_cmd_buffer,
+    transition_image_layout(cmd_buffer,
                             vk_swapchain_images[image_index],
                             VK_IMAGE_LAYOUT_UNDEFINED,
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -170,20 +177,20 @@ void record_cmd_buffer(uint32_t image_index) {
     rendering_info.layerCount = 1;
     rendering_info.colorAttachmentCount = 1;
     rendering_info.pColorAttachments = &attachment_info;
-    vkCmdBeginRendering(vk_cmd_buffer, &rendering_info);
+    vkCmdBeginRendering(cmd_buffer, &rendering_info);
 
-    vkCmdBindPipeline(vk_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipeline);
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipeline);
     
     VkViewport viewport = { 0.0f, 0.0f, static_cast<float>(vk_extent.width), static_cast<float>(vk_extent.height), 0.0f, 1.0f };
-    vkCmdSetViewport(vk_cmd_buffer, 0, 1, &viewport);
+    vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
     VkRect2D scissor = { { 0, 0 }, vk_extent };
-    vkCmdSetScissor(vk_cmd_buffer, 0, 1, &scissor);
+    vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
 
-    vkCmdDraw(vk_cmd_buffer, 3, 1, 0, 0);
+    vkCmdDraw(cmd_buffer, 3, 1, 0, 0);
 
-    vkCmdEndRendering(vk_cmd_buffer);
+    vkCmdEndRendering(cmd_buffer);
     
-    transition_image_layout(vk_cmd_buffer,
+    transition_image_layout(cmd_buffer,
                             vk_swapchain_images[image_index],
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
@@ -192,7 +199,7 @@ void record_cmd_buffer(uint32_t image_index) {
                             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                             VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT);
 
-    vkEndCommandBuffer(vk_cmd_buffer);
+    vkEndCommandBuffer(cmd_buffer);
 }
 
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
@@ -328,7 +335,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     queue_info.queueFamilyIndex = vk_queue_family_index;
     queue_info.queueIndex = 0;
     vkGetDeviceQueue2(vk_device->get_handle(), &queue_info, &vk_queue);
-
+    
     if (vk_queue == VK_NULL_HANDLE) {
         std::println(std::cerr, "Failed to retrieve Vulkan queue.");
         return SDL_APP_FAILURE;
@@ -486,21 +493,22 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     cmd_buffer_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     cmd_buffer_alloc_info.commandPool = vk_cmd_pool;
     cmd_buffer_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmd_buffer_alloc_info.commandBufferCount = 1;
-    vkAllocateCommandBuffers(vk_device->get_handle(), &cmd_buffer_alloc_info, &vk_cmd_buffer);
+    cmd_buffer_alloc_info.commandBufferCount = FRAMES_IN_FLIGHT;
+    vkAllocateCommandBuffers(vk_device->get_handle(), &cmd_buffer_alloc_info, vk_cmd_buffers.data());
 
-    VkSemaphoreCreateInfo semaphore_create_info = {};
-    semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    vkCreateSemaphore(vk_device->get_handle(), &semaphore_create_info, nullptr, &vk_render_semaphore);
-    vk_present_semaphores.resize(vk_swapchain_images.size());
-    for (auto& semaphore : vk_present_semaphores) {
-        vkCreateSemaphore(vk_device->get_handle(), &semaphore_create_info, nullptr, &semaphore);
+    for (int i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+        vk_present_semaphores.emplace_back(*vk_device);
+    }
+    for (int i = 0; i < vk_swapchain_images.size(); ++i) {
+        vk_render_semaphores.emplace_back(*vk_device);
     }
 
     VkFenceCreateInfo fence_create_info = {};
     fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    vkCreateFence(vk_device->get_handle(), &fence_create_info, nullptr, &vk_draw_fence);
+    for (auto& fence : vk_draw_fences) {
+        vkCreateFence(vk_device->get_handle(), &fence_create_info, nullptr, &fence);
+    }
 
     return SDL_APP_CONTINUE;
 }
@@ -516,35 +524,37 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 }
 
 SDL_AppResult SDL_AppIterate(void* appstate) {
-    vkWaitForFences(vk_device->get_handle(), 1, &vk_draw_fence, VK_TRUE, std::numeric_limits<uint64_t>::max());
+    vkWaitForFences(vk_device->get_handle(), 1, &vk_draw_fences[frame_index], VK_TRUE, std::numeric_limits<uint64_t>::max());
 
     uint32_t image_index = 0;
-    vkAcquireNextImageKHR(vk_device->get_handle(), vk_swapchain, std::numeric_limits<uint64_t>::max(), vk_present_semaphores[0], VK_NULL_HANDLE, &image_index);
+    vkAcquireNextImageKHR(vk_device->get_handle(), vk_swapchain, std::numeric_limits<uint64_t>::max(), vk_present_semaphores[frame_index].get_handle(), VK_NULL_HANDLE, &image_index);
 
     record_cmd_buffer(image_index);
 
-    vkResetFences(vk_device->get_handle(), 1, &vk_draw_fence);
+    vkResetFences(vk_device->get_handle(), 1, &vk_draw_fences[frame_index]);
 
     VkPipelineStageFlags wait_destination_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo submit_info = {};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.waitSemaphoreCount = 1;
-    submit_info.pWaitSemaphores = &vk_present_semaphores[image_index];
+    submit_info.pWaitSemaphores = &vk_present_semaphores[frame_index];
     submit_info.pWaitDstStageMask = &wait_destination_stage;
     submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &vk_cmd_buffer;
+    submit_info.pCommandBuffers = &vk_cmd_buffers[frame_index];
     submit_info.signalSemaphoreCount = 1;
-    submit_info.pSignalSemaphores = &vk_render_semaphore;
-    vkQueueSubmit(vk_queue, 1, &submit_info, vk_draw_fence);
+    submit_info.pSignalSemaphores = &vk_render_semaphores[image_index];
+    vkQueueSubmit(vk_queue, 1, &submit_info, vk_draw_fences[frame_index]);
 
     VkPresentInfoKHR present_info = {};
     present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     present_info.waitSemaphoreCount = 1;
-    present_info.pWaitSemaphores = &vk_render_semaphore;
+    present_info.pWaitSemaphores = &vk_render_semaphores[image_index];
     present_info.swapchainCount = 1;
     present_info.pSwapchains = &vk_swapchain;
     present_info.pImageIndices = &image_index;
     vkQueuePresentKHR(vk_queue, &present_info);
+
+    frame_index = (frame_index + 1) % FRAMES_IN_FLIGHT;
 
     return SDL_APP_CONTINUE;
 }
@@ -552,12 +562,12 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 void SDL_AppQuit(void* appstate, SDL_AppResult result) {
     vkDeviceWaitIdle(vk_device->get_handle());
 
-    vkDestroyFence(vk_device->get_handle(), vk_draw_fence, nullptr);
-    for (auto& semaphore : vk_present_semaphores) {
-        vkDestroySemaphore(vk_device->get_handle(), semaphore, nullptr);
+    for (auto& fence : vk_draw_fences) {
+        vkDestroyFence(vk_device->get_handle(), fence, nullptr);
     }
-    vkDestroySemaphore(vk_device->get_handle(), vk_render_semaphore, nullptr);
-    vkFreeCommandBuffers(vk_device->get_handle(), vk_cmd_pool, 1, &vk_cmd_buffer);
+    vk_render_semaphores.clear();
+    vk_present_semaphores.clear();
+    vkFreeCommandBuffers(vk_device->get_handle(), vk_cmd_pool, static_cast<uint32_t>(vk_cmd_buffers.size()), vk_cmd_buffers.data());
     vkDestroyCommandPool(vk_device->get_handle(), vk_cmd_pool, nullptr);
     vkDestroyPipeline(vk_device->get_handle(), vk_pipeline, nullptr);
     for (auto& image_view : vk_swapchain_images_views) {

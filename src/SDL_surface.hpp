@@ -22,6 +22,8 @@ public:
 
     VkExtent2D get_extent(const VkSurfaceCapabilitiesKHR& surface_caps) const;
 
+    bool presentation_support(VkPhysicalDevice physical_device, uint32_t queue_family_index) const;
+
     operator VkSurfaceKHR() const noexcept { return handle_; }
 private:
     SDL_Window* window_ = nullptr;

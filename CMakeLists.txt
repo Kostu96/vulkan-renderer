@@ -18,6 +18,8 @@ add_executable(app
     src/vulkan_utils/fence.hpp
     src/vulkan_utils/instance.cpp
     src/vulkan_utils/instance.hpp
+    src/vulkan_utils/pipeline.cpp
+    src/vulkan_utils/pipeline.hpp
     src/vulkan_utils/semaphore.cpp
     src/vulkan_utils/semaphore.hpp
     src/vulkan_utils/swapchain.cpp

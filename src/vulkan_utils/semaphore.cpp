@@ -8,8 +8,9 @@ namespace vkutils {
 Semaphore::Semaphore(const Device& device) :
     device_{ device }
 {
-    VkSemaphoreCreateInfo create_info = {};
-    create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    const VkSemaphoreCreateInfo create_info = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+    };
     VkResult result = vkCreateSemaphore(device, &create_info, nullptr, &handle_);
     if (result != VK_SUCCESS) {
         throw std::runtime_error{ "Failed to create Vulkan semaphore." };

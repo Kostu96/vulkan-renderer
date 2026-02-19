@@ -5,22 +5,15 @@
 
 namespace vkutils {
 
-std::vector<VkExtensionProperties> get_instance_extension_properties();
+VkPhysicalDeviceProperties get_physical_device_properties(VkPhysicalDevice physical_device);
 
-std::vector<VkLayerProperties> get_instance_layer_properties();
+VkPhysicalDeviceFeatures get_physical_device_features(VkPhysicalDevice physical_device);
 
-VkDebugUtilsMessengerEXT create_debug_messenger(VkInstance instance,
-                                                PFN_vkDebugUtilsMessengerCallbackEXT callback);
-
-std::vector<VkPhysicalDevice> get_physical_devices(VkInstance instance);
-
-VkPhysicalDeviceProperties2 get_physical_device_properties(VkPhysicalDevice physical_device);
-
-VkPhysicalDeviceFeatures2 get_physical_device_features(VkPhysicalDevice physical_device);
+VkPhysicalDeviceMemoryProperties get_physical_device_memory_properties(VkPhysicalDevice physical_device);
 
 std::vector<VkExtensionProperties> get_physical_device_extension_properties(VkPhysicalDevice physical_device);
 
-std::vector<VkQueueFamilyProperties2> get_physical_queue_family_properties(VkPhysicalDevice physical_device);
+std::vector<VkQueueFamilyProperties> get_physical_queue_family_properties(VkPhysicalDevice physical_device);
 
 VkSurfaceCapabilitiesKHR get_physical_device_surface_capabilities(VkPhysicalDevice physical_device,
                                                                   VkSurfaceKHR surface);

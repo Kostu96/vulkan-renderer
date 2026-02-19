@@ -4,6 +4,7 @@
 #include <volk/volk.h>
 
 #include <span>
+#include <vector>
 
 namespace vkutils {
 
@@ -16,7 +17,13 @@ public:
 
     ~Instance();
 
+    std::vector<VkPhysicalDevice> get_physical_devices() const;
+
     operator VkInstance() const noexcept { return handle_; }
+
+    static std::vector<VkExtensionProperties> get_extension_properties();
+
+    static std::vector<VkLayerProperties> get_layer_properties();
 private:
     VkInstance handle_ = VK_NULL_HANDLE;
     VkDebugUtilsMessengerEXT dbg_messenger_ = VK_NULL_HANDLE;

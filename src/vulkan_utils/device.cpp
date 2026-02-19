@@ -10,13 +10,14 @@ Device::Device(VkPhysicalDevice physical_device,
                const void* next) :
     physical_device_{ physical_device }
 {
-    VkDeviceCreateInfo create_info = {};
-    create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    create_info.queueCreateInfoCount = static_cast<uint32_t>(queues.size());;
-    create_info.pQueueCreateInfos = queues.data();
-    create_info.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
-    create_info.ppEnabledExtensionNames = extensions.data();
-    create_info.pNext = next;
+    const VkDeviceCreateInfo create_info = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .pNext = next,
+        .queueCreateInfoCount = static_cast<uint32_t>(queues.size()),
+        .pQueueCreateInfos = queues.data(),
+        .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
+        .ppEnabledExtensionNames = extensions.data()
+    };
     VkResult result = vkCreateDevice(physical_device, &create_info, nullptr, &handle_);
     if (result != VK_SUCCESS) {
         throw std::runtime_error{ "Failed to create Vulkan device." };
@@ -27,6 +28,13 @@ Device::Device(VkPhysicalDevice physical_device,
 
 Device::~Device() {
     vkDestroyDevice(handle_, nullptr);
+}
+
+void Device::wait_idle() const {
+    VkResult result = vkDeviceWaitIdle(handle_);
+    if (result != VK_SUCCESS) {
+        throw std::runtime_error{ "Failed to idle on a device." };
+    }
 }
 
 }

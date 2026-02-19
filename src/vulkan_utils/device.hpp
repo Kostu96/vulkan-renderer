@@ -17,6 +17,8 @@ public:
 
     ~Device();
 
+    void wait_idle() const;
+
     VkPhysicalDevice get_physical_device() const { return physical_device_; }
 
     operator VkDevice() const noexcept { return handle_; }

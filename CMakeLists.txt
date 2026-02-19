@@ -10,7 +10,7 @@ include(cmake/dependencies.cmake)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 find_package (Vulkan REQUIRED)
 
-add_executable(app
+set(APP_SOURCES
     src/utils/non_copyable.hpp
     src/vulkan_utils/device.cpp
     src/vulkan_utils/device.hpp
@@ -18,10 +18,13 @@ add_executable(app
     src/vulkan_utils/fence.hpp
     src/vulkan_utils/instance.cpp
     src/vulkan_utils/instance.hpp
+    src/vulkan_utils/pipeline.cpp
+    src/vulkan_utils/pipeline.hpp
     src/vulkan_utils/semaphore.cpp
     src/vulkan_utils/semaphore.hpp
     src/vulkan_utils/swapchain.cpp
     src/vulkan_utils/swapchain.hpp
+    src/vulkan_utils/vma.cpp
     src/vulkan_utils/volk.cpp
     src/vulkan_utils/vulkan_utils.cpp
     src/vulkan_utils/vulkan_utils.hpp
@@ -30,14 +33,23 @@ add_executable(app
     src/SDL_surface.hpp
 )
 
+add_executable(app
+    CMakeLists.txt
+    ${APP_SOURCES}
+)
+
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src PREFIX src FILES ${APP_SOURCES})
+
 target_compile_features(app PRIVATE cxx_std_23)
 
 target_include_directories(app PRIVATE
     src
+    third_party/vma/include
     third_party/volk/include
 )
 
 target_link_libraries(app PRIVATE
+    glm::glm
     SDL3::SDL3
     Vulkan::Headers
 )

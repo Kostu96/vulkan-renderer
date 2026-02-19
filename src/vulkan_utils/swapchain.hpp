@@ -8,23 +8,37 @@
 namespace vkutils {
 
 class Device;
+class Semaphore;
 
 class Swapchain final :
     NonCopyable {
 public:
     Swapchain(const Device& device,
               VkSurfaceKHR surface,
+              VkSurfaceCapabilitiesKHR surface_caps,
               VkSurfaceFormatKHR format,
               uint32_t image_count,
-              VkExtent2D extent,
-              VkSurfaceTransformFlagBitsKHR pre_transform,
-              VkPresentModeKHR present_mode);
+              VkExtent2D extent);
     
     Swapchain(Swapchain&& other) noexcept;
 
     ~Swapchain();
 
     VkSwapchainKHR* ptr() noexcept { return &handle_; }
+
+    uint32_t get_image_count() const noexcept { return static_cast<uint32_t>(images_.size()); }
+
+    /*VkImage get_image(uint32_t index) const noexcept { return images_[index]; }
+
+    VkImageView get_image_view(uint32_t index) const noexcept { return image_views_[index]; }*/
+
+    struct NextImage {
+        VkImage image;
+        VkImageView image_view;
+        uint32_t image_index;
+        bool should_recreate_swapchain;
+    };
+    NextImage acquire_next_image(const Semaphore& semaphore) const;
 
     operator VkSwapchainKHR() const noexcept { return handle_; }
 private:

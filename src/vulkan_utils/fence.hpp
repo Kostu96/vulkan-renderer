@@ -16,6 +16,10 @@ public:
 
     ~Fence();
 
+    void reset() const;
+
+    void wait() const;
+
     VkFence* ptr() noexcept { return &handle_; }
 
     operator VkFence() const noexcept { return handle_; }

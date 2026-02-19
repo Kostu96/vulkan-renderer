@@ -8,6 +8,7 @@
 namespace vkutils {
 
 class Device;
+class Semaphore;
 
 class Swapchain final :
     NonCopyable {
@@ -30,6 +31,8 @@ public:
     VkImage get_image(uint32_t index) const noexcept { return images_[index]; }
 
     VkImageView get_image_view(uint32_t index) const noexcept { return image_views_[index]; }
+
+    void acquire_next_image(const Semaphore& semaphore) const;
 
     operator VkSwapchainKHR() const noexcept { return handle_; }
 private:

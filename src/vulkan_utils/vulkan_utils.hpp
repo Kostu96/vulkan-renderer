@@ -5,15 +5,6 @@
 
 namespace vkutils {
 
-std::vector<VkExtensionProperties> get_instance_extension_properties();
-
-std::vector<VkLayerProperties> get_instance_layer_properties();
-
-VkDebugUtilsMessengerEXT create_debug_messenger(VkInstance instance,
-                                                PFN_vkDebugUtilsMessengerCallbackEXT callback);
-
-std::vector<VkPhysicalDevice> get_physical_devices(VkInstance instance);
-
 VkPhysicalDeviceProperties2 get_physical_device_properties(VkPhysicalDevice physical_device);
 
 VkPhysicalDeviceFeatures2 get_physical_device_features(VkPhysicalDevice physical_device);

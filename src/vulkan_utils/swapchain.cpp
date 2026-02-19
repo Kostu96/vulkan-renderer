@@ -1,5 +1,6 @@
 #include "vulkan_utils/swapchain.hpp"
 #include "vulkan_utils/device.hpp"
+#include "vulkan_utils/semaphore.hpp"
 #include "vulkan_utils/vulkan_utils.hpp"
 
 #include <algorithm>
@@ -89,6 +90,12 @@ Swapchain::~Swapchain() {
         vkDestroyImageView(device_, image_view, nullptr);
     }
     vkDestroySwapchainKHR(device_, handle_, nullptr);
+}
+
+void Swapchain::acquire_next_image(const Semaphore& semaphore) const {
+    uint32_t image_index = 0;
+    VkResult result = vkAcquireNextImageKHR(device_, handle_, std::numeric_limits<uint64_t>::max(), semaphore, VK_NULL_HANDLE, &image_index);
+    // TODO(Kostu): impl
 }
 
 }

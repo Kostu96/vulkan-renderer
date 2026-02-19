@@ -32,6 +32,8 @@ add_executable(app
     src/SDL_surface.hpp
 )
 
+source_group(TREE src)
+
 target_compile_features(app PRIVATE cxx_std_23)
 
 target_include_directories(app PRIVATE

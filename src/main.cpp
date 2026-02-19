@@ -97,18 +97,19 @@ uint32_t vk_queue_family_index = 0;
 std::unique_ptr<vkutils::Device> vk_device;
 VkQueue vk_queue = VK_NULL_HANDLE;
 std::unique_ptr<vkutils::Swapchain> vk_swapchain;
-//VkPipeline vk_pipeline;
 std::unique_ptr<vkutils::Pipeline> vk_pipeline;
 VkCommandPool vk_cmd_pool;
 std::array<VkCommandBuffer, FRAMES_IN_FLIGHT> vk_cmd_buffers;
 std::vector<vkutils::Semaphore> vk_present_semaphores;
 std::vector<vkutils::Semaphore> vk_render_semaphores;
 std::vector<vkutils::Fence> vk_draw_fences;
+VkSurfaceCapabilitiesKHR vk_surface_caps;
+VkSurfaceFormatKHR vk_surface_format;
 VkExtent2D vk_extent;
 uint32_t frame_index = 0;
 
 VkPhysicalDevice choose_physical_device(std::span<const char*> required_extensions) {
-    auto physical_devices = vkutils::get_physical_devices(*vk_instance);
+    auto physical_devices = vk_instance->get_physical_devices();
     for (auto& physical_device : physical_devices) {
         // TODO(Kostu): Device scoring
         auto physical_device_props = vkutils::get_physical_device_properties(physical_device);
@@ -182,7 +183,7 @@ void record_cmd_buffer(VkImage image, VkImageView image_view) {
     rendering_info.pColorAttachments = &attachment_info;
     vkCmdBeginRendering(cmd_buffer, &rendering_info);
 
-    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipeline);
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, *vk_pipeline);
     
     VkViewport viewport = { 0.0f, 0.0f, static_cast<float>(vk_extent.width), static_cast<float>(vk_extent.height), 0.0f, 1.0f };
     vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
@@ -203,6 +204,12 @@ void record_cmd_buffer(VkImage image, VkImageView image_view) {
                             VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT);
 
     vkEndCommandBuffer(cmd_buffer);
+}
+
+void recreate_swapchain() {
+    vk_device->wait_idle();
+    vk_extent = vk_surface->get_extent(vk_surface_caps);
+    vk_swapchain = std::make_unique<vkutils::Swapchain>(*vk_device, *vk_surface, vk_surface_caps, vk_surface_format, 3u, vk_extent);
 }
 
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
@@ -227,7 +234,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     }
 
     std::vector<const char*> required_extensions = get_required_extensions();
-    auto instance_extension_props = vkutils::get_instance_extension_properties();
+    auto instance_extension_props = vkutils::Instance::get_extension_properties();
     for (auto& extension : required_extensions) {
         if (std::ranges::none_of(instance_extension_props,
                                  [extension](auto& extension_prop) {
@@ -242,7 +249,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     required_layers.push_back("VK_LAYER_KHRONOS_validation");
 #endif
 
-    auto instance_layer_props = vkutils::get_instance_layer_properties();
+    auto instance_layer_props = vkutils::Instance::get_layer_properties();
 
     if (std::ranges::any_of(required_layers,
                             [&instance_layer_props](auto& required_layer) {
@@ -302,17 +309,17 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
 
-    auto surface_caps = vkutils::get_physical_device_surface_capabilities(physical_device, *vk_surface);
+    vk_surface_caps = vkutils::get_physical_device_surface_capabilities(physical_device, *vk_surface);
     auto surface_formats = vkutils::get_physical_device_surface_formats(physical_device, *vk_surface);
 
-    vk_extent = vk_surface->get_extent(surface_caps);
-    auto format = choose_swap_surface_format(surface_formats);
+    vk_surface_format = choose_swap_surface_format(surface_formats);
 
-    vk_swapchain = std::make_unique<vkutils::Swapchain>(*vk_device, *vk_surface, surface_caps, format, 3u, vk_extent);
+    recreate_swapchain();
 
     auto shader_code = read_file("shaders/simple.spv");
     if (shader_code[0] != 0x07230203) {
-        throw std::runtime_error("Not valid SPIR-V");
+        std::println(std::cerr, "Not valid SPIR-V");
+        return SDL_APP_FAILURE;
     }
     
     VkShaderModuleCreateInfo shader_module_create_info = {};
@@ -332,79 +339,8 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     stages[1].pName = "frag_main";
 
-    std::vector<VkDynamicState> dynamic_states = {
-        VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR
-    };
-    VkPipelineDynamicStateCreateInfo dynamic_state_create_info = {};
-    dynamic_state_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamic_state_create_info.dynamicStateCount = static_cast<uint32_t>(dynamic_states.size());
-    dynamic_state_create_info.pDynamicStates = dynamic_states.data();
+    vk_pipeline = std::make_unique<vkutils::Pipeline>(*vk_device, stages, vk_surface_format.format);
 
-    VkPipelineVertexInputStateCreateInfo vertex_input_create_info = {};
-    vertex_input_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-
-    VkPipelineInputAssemblyStateCreateInfo input_assembly_create_info = {};
-    input_assembly_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    input_assembly_create_info.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-    VkPipelineViewportStateCreateInfo viewport_create_info = {};
-    viewport_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewport_create_info.viewportCount = 1;
-    viewport_create_info.scissorCount = 1;
-
-    VkPipelineRasterizationStateCreateInfo rasterization_create_info = {};
-    rasterization_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterization_create_info.depthClampEnable = VK_FALSE;
-    rasterization_create_info.rasterizerDiscardEnable = VK_FALSE;
-    rasterization_create_info.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterization_create_info.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterization_create_info.frontFace = VK_FRONT_FACE_CLOCKWISE;
-    rasterization_create_info.depthBiasEnable = VK_FALSE;
-    rasterization_create_info.depthBiasSlopeFactor = 1.0f;
-    rasterization_create_info.lineWidth = 1.0f;
-
-    VkPipelineMultisampleStateCreateInfo multisample_create_info = {};
-    multisample_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisample_create_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    multisample_create_info.sampleShadingEnable = VK_FALSE;
-
-    VkPipelineColorBlendAttachmentState color_blend_attachment = {};
-    color_blend_attachment.blendEnable = VK_FALSE;
-    color_blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    VkPipelineColorBlendStateCreateInfo color_blend_create_info = {};
-    color_blend_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    color_blend_create_info.logicOpEnable = VK_FALSE;
-    color_blend_create_info.attachmentCount = 1;
-    color_blend_create_info.pAttachments = &color_blend_attachment;
-
-    VkPipelineLayoutCreateInfo layout_create_info = {};
-    layout_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    VkPipelineLayout layout;
-    vkCreatePipelineLayout(*vk_device, &layout_create_info, nullptr, &layout);
-
-    VkPipelineRenderingCreateInfo rendering_create_info = {};
-    rendering_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    rendering_create_info.colorAttachmentCount = 1;
-    rendering_create_info.pColorAttachmentFormats = &format.format;
-
-    // VkGraphicsPipelineCreateInfo pipeline_create_info = {};
-    // pipeline_create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    // pipeline_create_info.stageCount = static_cast<uint32_t>(stages.size());
-    // pipeline_create_info.pStages = stages.data();
-    // pipeline_create_info.pVertexInputState = &vertex_input_create_info;
-    // pipeline_create_info.pInputAssemblyState = &input_assembly_create_info;
-    // pipeline_create_info.pViewportState = &viewport_create_info;
-    // pipeline_create_info.pRasterizationState = &rasterization_create_info;
-    // pipeline_create_info.pMultisampleState = &multisample_create_info;
-    // pipeline_create_info.pDynamicState = &dynamic_state_create_info;
-    // pipeline_create_info.pColorBlendState = &color_blend_create_info;
-    // pipeline_create_info.layout = layout;
-    // pipeline_create_info.pNext = &rendering_create_info;
-    // vkCreateGraphicsPipelines(*vk_device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &vk_pipeline);
-    vk_pipeline = std::make_unique<vkutils::Pipeline>(*vk_device);
-
-    vkDestroyPipelineLayout(*vk_device, layout, nullptr);
     vkDestroyShaderModule(*vk_device, vk_shader_module, nullptr);
 
     VkCommandPoolCreateInfo cmd_pool_create_info = {};
@@ -442,16 +378,24 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 }
 
 SDL_AppResult SDL_AppIterate(void* appstate) {
-    vkWaitForFences(*vk_device, 1, vk_draw_fences[frame_index].ptr(), VK_TRUE, std::numeric_limits<uint64_t>::max());
+    vk_draw_fences[frame_index].wait();
 
     uint32_t image_index = 0;
-    vkAcquireNextImageKHR(*vk_device, *vk_swapchain, std::numeric_limits<uint64_t>::max(), vk_present_semaphores[frame_index], VK_NULL_HANDLE, &image_index);
+    VkResult result = vkAcquireNextImageKHR(*vk_device, *vk_swapchain, std::numeric_limits<uint64_t>::max(), vk_present_semaphores[frame_index], VK_NULL_HANDLE, &image_index);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        recreate_swapchain();
+        return SDL_APP_CONTINUE;
+    }
+    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+        std::println(std::cerr, "Failed to acquire swapchain image.");
+        return SDL_APP_FAILURE;
+    }
 
     record_cmd_buffer(vk_swapchain->get_image(image_index), vk_swapchain->get_image_view(image_index));
 
-    vkResetFences(*vk_device, 1, vk_draw_fences[frame_index].ptr());
+    vk_draw_fences[frame_index].reset();
 
-    VkPipelineStageFlags wait_destination_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    const VkPipelineStageFlags wait_destination_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo submit_info = {};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.waitSemaphoreCount = 1;
@@ -470,7 +414,10 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
     present_info.swapchainCount = 1;
     present_info.pSwapchains = vk_swapchain->ptr();
     present_info.pImageIndices = &image_index;
-    vkQueuePresentKHR(vk_queue, &present_info);
+    result = vkQueuePresentKHR(vk_queue, &present_info);
+    if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
+        recreate_swapchain();
+    }
 
     frame_index = (frame_index + 1) % FRAMES_IN_FLIGHT;
 
@@ -478,14 +425,14 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 }
 
 void SDL_AppQuit(void* appstate, SDL_AppResult result) {
-    vkDeviceWaitIdle(*vk_device);
+    vk_device->wait_idle();
 
     vk_render_semaphores.clear();
     vk_present_semaphores.clear();
     vk_draw_fences.clear();
     vkFreeCommandBuffers(*vk_device, vk_cmd_pool, static_cast<uint32_t>(vk_cmd_buffers.size()), vk_cmd_buffers.data());
     vkDestroyCommandPool(*vk_device, vk_cmd_pool, nullptr);
-    //vkDestroyPipeline(*vk_device, vk_pipeline, nullptr);
+    vk_pipeline.reset();
     vk_swapchain.reset();
     vk_device.reset();
     vk_surface.reset();

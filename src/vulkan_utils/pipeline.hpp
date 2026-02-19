@@ -3,6 +3,8 @@
 
 #include <volk/volk.h>
 
+#include <span>
+
 namespace vkutils {
 
 class Device;
@@ -10,7 +12,7 @@ class Device;
 class Pipeline final :
     NonCopyable {
 public:
-    Pipeline(const Device& device);
+    Pipeline(const Device& device, std::span<const VkPipelineShaderStageCreateInfo> stages, VkFormat color_attachment_format);
 
     ~Pipeline();
 

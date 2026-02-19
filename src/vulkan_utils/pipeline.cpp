@@ -6,7 +6,11 @@
 
 namespace vkutils {
 
-Pipeline::Pipeline(const Device& device, std::span<const VkPipelineShaderStageCreateInfo> stages, VkFormat color_attachment_format) :
+Pipeline::Pipeline(const Device& device,
+                   std::span<const VkPipelineShaderStageCreateInfo> stages,
+                   VkFormat color_attachment_format,
+                   const VkVertexInputBindingDescription& vertex_binding_desc,
+                   std::span<const VkVertexInputAttributeDescription> vertex_attribute_descs) :
     device_{ device }
 {
     const VkPipelineRenderingCreateInfo rendering_create_info = {
@@ -16,7 +20,11 @@ Pipeline::Pipeline(const Device& device, std::span<const VkPipelineShaderStageCr
     };
 
     const VkPipelineVertexInputStateCreateInfo vertex_input_create_info = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount = 1,
+        .pVertexBindingDescriptions = &vertex_binding_desc,
+        .vertexAttributeDescriptionCount = static_cast<uint32_t>(vertex_attribute_descs.size()),
+        .pVertexAttributeDescriptions = vertex_attribute_descs.data()
     };
 
     const VkPipelineInputAssemblyStateCreateInfo input_assembly_create_info = {

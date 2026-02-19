@@ -4,20 +4,31 @@
 
 namespace vkutils {
 
-VkPhysicalDeviceProperties2 get_physical_device_properties(VkPhysicalDevice physical_device) {
-    VkPhysicalDeviceProperties2 props = {};
-    props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+VkPhysicalDeviceProperties get_physical_device_properties(VkPhysicalDevice physical_device) {
+    VkPhysicalDeviceProperties2 props = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2
+    };
     vkGetPhysicalDeviceProperties2(physical_device, &props);
 
-    return props;
+    return props.properties;
 }
 
-VkPhysicalDeviceFeatures2 get_physical_device_features(VkPhysicalDevice physical_device) {
-    VkPhysicalDeviceFeatures2 feats = {};
-    feats.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+VkPhysicalDeviceFeatures get_physical_device_features(VkPhysicalDevice physical_device) {
+    VkPhysicalDeviceFeatures2 feats = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2
+    };
     vkGetPhysicalDeviceFeatures2(physical_device, &feats);
 
-    return feats;
+    return feats.features;
+}
+
+VkPhysicalDeviceMemoryProperties get_physical_device_memory_properties(VkPhysicalDevice physical_device) {
+    VkPhysicalDeviceMemoryProperties2 props = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2
+    };
+    vkGetPhysicalDeviceMemoryProperties2(physical_device, &props);
+
+    return props.memoryProperties;
 }
 
 std::vector<VkExtensionProperties> get_physical_device_extension_properties(VkPhysicalDevice physical_device) {
@@ -36,16 +47,22 @@ std::vector<VkExtensionProperties> get_physical_device_extension_properties(VkPh
     return extensions;
 }
 
-std::vector<VkQueueFamilyProperties2> get_physical_queue_family_properties(VkPhysicalDevice physical_device) {
+std::vector<VkQueueFamilyProperties> get_physical_queue_family_properties(VkPhysicalDevice physical_device) {
     uint32_t count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties2(physical_device, &count, nullptr);
 
-    std::vector<VkQueueFamilyProperties2> props{ count };
-    for (auto& prop : props) {
+    std::vector<VkQueueFamilyProperties2> props2{ count };
+    for (auto& prop : props2) {
         prop.sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2;
         prop.pNext = nullptr;
     }
-    vkGetPhysicalDeviceQueueFamilyProperties2(physical_device, &count, props.data());
+    vkGetPhysicalDeviceQueueFamilyProperties2(physical_device, &count, props2.data());
+
+    std::vector<VkQueueFamilyProperties> props;
+    props.reserve(props2.size());
+    for (auto& prop : props2) {
+        props.push_back(prop.queueFamilyProperties);
+    }
 
     return props;
 }

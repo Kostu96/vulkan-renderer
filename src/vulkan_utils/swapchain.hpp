@@ -28,11 +28,17 @@ public:
 
     uint32_t get_image_count() const noexcept { return static_cast<uint32_t>(images_.size()); }
 
-    VkImage get_image(uint32_t index) const noexcept { return images_[index]; }
+    /*VkImage get_image(uint32_t index) const noexcept { return images_[index]; }
 
-    VkImageView get_image_view(uint32_t index) const noexcept { return image_views_[index]; }
+    VkImageView get_image_view(uint32_t index) const noexcept { return image_views_[index]; }*/
 
-    void acquire_next_image(const Semaphore& semaphore) const;
+    struct NextImage {
+        VkImage image;
+        VkImageView image_view;
+        uint32_t image_index;
+        bool should_recreate_swapchain;
+    };
+    NextImage acquire_next_image(const Semaphore& semaphore) const;
 
     operator VkSwapchainKHR() const noexcept { return handle_; }
 private:

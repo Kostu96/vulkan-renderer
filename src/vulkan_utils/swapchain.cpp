@@ -92,10 +92,18 @@ Swapchain::~Swapchain() {
     vkDestroySwapchainKHR(device_, handle_, nullptr);
 }
 
-void Swapchain::acquire_next_image(const Semaphore& semaphore) const {
-    uint32_t image_index = 0;
-    VkResult result = vkAcquireNextImageKHR(device_, handle_, std::numeric_limits<uint64_t>::max(), semaphore, VK_NULL_HANDLE, &image_index);
-    // TODO(Kostu): impl
+Swapchain::NextImage Swapchain::acquire_next_image(const Semaphore& semaphore) const {
+    NextImage next_image = {};
+    VkResult result = vkAcquireNextImageKHR(device_, handle_, std::numeric_limits<uint64_t>::max(), semaphore, VK_NULL_HANDLE, &next_image.image_index);
+    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+        throw std::runtime_error{ "Failed to acquire swapchain image." };
+    }
+
+    next_image.image = images_[next_image.image_index];
+    next_image.image_view = image_views_[next_image.image_index];
+    next_image.should_recreate_swapchain = result == VK_ERROR_OUT_OF_DATE_KHR;
+    
+    return next_image;
 }
 
 }

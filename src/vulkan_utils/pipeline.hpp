@@ -12,7 +12,11 @@ class Device;
 class Pipeline final :
     NonCopyable {
 public:
-    Pipeline(const Device& device, std::span<const VkPipelineShaderStageCreateInfo> stages, VkFormat color_attachment_format);
+    Pipeline(const Device& device,
+             std::span<const VkPipelineShaderStageCreateInfo> stages,
+             VkFormat color_attachment_format,
+             const VkVertexInputBindingDescription& vertex_binding_desc,
+             std::span<const VkVertexInputAttributeDescription> vertex_attribute_descs);
 
     ~Pipeline();
 

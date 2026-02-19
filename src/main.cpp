@@ -7,10 +7,16 @@
 #include "vulkan_utils/vulkan_utils.hpp"
 #include "SDL_surface.hpp"
 
+#define VMA_STATIC_VULKAN_FUNCTIONS 0
+#define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
+#include <vma/vk_mem_alloc.h>
+
 #define SDL_MAIN_USE_CALLBACKS
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL_vulkan.h>
+
+#include <glm/glm.hpp>
 
 #include <algorithm>
 #include <array>
@@ -90,15 +96,29 @@ void transition_image_layout(VkCommandBuffer cmd_buffer,
     vkCmdPipelineBarrier2(cmd_buffer, &deps_info);
 }
 
+struct Vertex {
+    glm::vec2 position;
+    glm::vec3 color;
+};
+
+const std::array<Vertex, 3> vertices = {
+    Vertex{ {  0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
+    Vertex{ {  0.5f,  0.5f }, { 0.0f, 1.0f, 0.0f } },
+    Vertex{ { -0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } }
+};
+
 SDL_Window* sdl_window = nullptr;
 std::unique_ptr<vkutils::Instance> vk_instance;
 std::unique_ptr<SDLSurface> vk_surface;
 uint32_t vk_queue_family_index = 0;
 std::unique_ptr<vkutils::Device> vk_device;
 VkQueue vk_queue = VK_NULL_HANDLE;
+VmaAllocator vma_allocator;
 std::unique_ptr<vkutils::Swapchain> vk_swapchain;
 std::unique_ptr<vkutils::Pipeline> vk_pipeline;
-VkCommandPool vk_cmd_pool;
+VkBuffer vk_vertex_buffer = VK_NULL_HANDLE;
+VmaAllocation vma_vertex_buffer_alloc;
+VkCommandPool vk_cmd_pool = VK_NULL_HANDLE;
 std::array<VkCommandBuffer, FRAMES_IN_FLIGHT> vk_cmd_buffers;
 std::vector<vkutils::Semaphore> vk_present_semaphores;
 std::vector<vkutils::Semaphore> vk_render_semaphores;
@@ -117,11 +137,12 @@ VkPhysicalDevice choose_physical_device(std::span<const char*> required_extensio
         auto physical_device_extensions = vkutils::get_physical_device_extension_properties(physical_device);
         auto queue_family_props = vkutils::get_physical_queue_family_properties(physical_device);
 
-        bool is_suitable = (physical_device_props.properties.apiVersion >= VK_API_VERSION_1_3);
+        bool is_suitable = (physical_device_props.apiVersion >= VK_API_VERSION_1_3);
 
         bool has_graphics_capable_queue = false;
         for (auto [idx, queue_family] : std::views::enumerate(queue_family_props)) {
-            if ((queue_family.queueFamilyProperties.queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+            if ((queue_family.queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+                (queue_family.queueFlags & VK_QUEUE_TRANSFER_BIT) &&
                 SDL_Vulkan_GetPresentationSupport(*vk_instance, physical_device, idx) &&
                 vk_surface->presentation_support(physical_device, idx))
             {
@@ -190,7 +211,10 @@ void record_cmd_buffer(VkImage image, VkImageView image_view) {
     VkRect2D scissor = { { 0, 0 }, vk_extent };
     vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
 
-    vkCmdDraw(cmd_buffer, 3, 1, 0, 0);
+    const VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vk_vertex_buffer, &offset);
+
+    vkCmdDraw(cmd_buffer, vertices.size(), 1, 0, 0);
 
     vkCmdEndRendering(cmd_buffer);
     
@@ -212,6 +236,18 @@ void recreate_swapchain() {
     vk_swapchain = std::make_unique<vkutils::Swapchain>(*vk_device, *vk_surface, vk_surface_caps, vk_surface_format, 3u, vk_extent);
 }
 
+uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags properties) {
+    auto memory_properties = vkutils::get_physical_device_memory_properties(vk_device->get_physical_device());
+    for (uint32_t i = 0; i < memory_properties.memoryTypeCount; i++) {
+        if ((type_filter & (1 << i)) && (memory_properties.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
+    }
+
+    throw std::runtime_error("Failed to find suitable memory type!");
+    return 0;
+}
+
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::println(std::cerr, "SDL_Init failed: {}.", SDL_GetError());
@@ -227,8 +263,8 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
 
-    VkResult vk_result = volkInitialize();
-    if (vk_result != VK_SUCCESS) {
+    VkResult result = volkInitialize();
+    if (result != VK_SUCCESS) {
         std::println(std::cerr, "Failed to load Vulkan library.");
         return SDL_APP_FAILURE;
     }
@@ -260,13 +296,14 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
     
-    VkApplicationInfo app_info = {};
-    app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    app_info.pApplicationName = "Vulkan Renderer";
-    app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    app_info.pEngineName = "No Engine";
-    app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    app_info.apiVersion = VK_API_VERSION_1_4;
+    const VkApplicationInfo app_info = {
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pApplicationName = "Vulkan Renderer",
+        .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+        .pEngineName = "No Engine",
+        .engineVersion = VK_MAKE_VERSION(1, 0, 0),
+        .apiVersion = VK_API_VERSION_1_4
+    };
 
     vk_instance = std::make_unique<vkutils::Instance>(app_info, std::span{ required_extensions }, std::span{ required_layers });
     vk_surface = std::make_unique<SDLSurface>(sdl_window, *vk_instance);
@@ -309,6 +346,17 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
 
+    VmaAllocatorCreateInfo vma_allocator_create_info = {
+        .physicalDevice = vk_device->get_physical_device(),
+        .device = *vk_device,
+        .instance = *vk_instance,
+        .vulkanApiVersion = app_info.apiVersion
+    };
+    VmaVulkanFunctions vulkan_functions;
+    result = vmaImportVulkanFunctionsFromVolk(&vma_allocator_create_info, &vulkan_functions);
+    vma_allocator_create_info.pVulkanFunctions = &vulkan_functions;
+    result = vmaCreateAllocator(&vma_allocator_create_info, &vma_allocator);
+
     vk_surface_caps = vkutils::get_physical_device_surface_capabilities(physical_device, *vk_surface);
     auto surface_formats = vkutils::get_physical_device_surface_formats(physical_device, *vk_surface);
 
@@ -339,9 +387,98 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     stages[1].pName = "frag_main";
 
-    vk_pipeline = std::make_unique<vkutils::Pipeline>(*vk_device, stages, vk_surface_format.format);
+    const VkVertexInputBindingDescription vertex_binding_description = {
+        .binding = 0,
+        .stride = sizeof(Vertex),
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
+    };
+
+    std::array<VkVertexInputAttributeDescription, 2> vertex_attribute_descriptions = {
+        VkVertexInputAttributeDescription{
+            .location = 0,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32_SFLOAT,
+            .offset = offsetof(Vertex, position)
+        },
+        VkVertexInputAttributeDescription{
+            .location = 1,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(Vertex, color)
+        }
+    };
+
+    vk_pipeline = std::make_unique<vkutils::Pipeline>(*vk_device, stages, vk_surface_format.format, vertex_binding_description, vertex_attribute_descriptions);
 
     vkDestroyShaderModule(*vk_device, vk_shader_module, nullptr);
+
+    const VkCommandPoolCreateInfo staging_cmd_pool_create_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+        .queueFamilyIndex = vk_queue_family_index
+    };
+    VkCommandPool staging_cmd_pool;
+    vkCreateCommandPool(*vk_device, &staging_cmd_pool_create_info, nullptr, &staging_cmd_pool);
+
+    {
+        const VkDeviceSize buffer_size = vertices.size() * sizeof(Vertex);
+
+        const VkBufferCreateInfo staging_create_info = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = buffer_size,
+            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+        };
+        const VmaAllocationCreateInfo staging_alloc_create_info = {
+            .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+            .usage = VMA_MEMORY_USAGE_AUTO
+        };
+        VkBuffer staging_buffer;
+        VmaAllocation staging_alloc;
+        vmaCreateBuffer(vma_allocator, &staging_create_info, &staging_alloc_create_info, &staging_buffer, &staging_alloc, nullptr);
+
+        vmaCopyMemoryToAllocation(vma_allocator, vertices.data(), staging_alloc, 0, buffer_size);
+
+        const VkBufferCreateInfo buffer_create_info = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = buffer_size,
+            .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
+        };
+        const VmaAllocationCreateInfo alloc_create_info = {
+            .usage = VMA_MEMORY_USAGE_AUTO
+        };
+        vmaCreateBuffer(vma_allocator, &buffer_create_info, &alloc_create_info, &vk_vertex_buffer, &vma_vertex_buffer_alloc, nullptr);
+
+        const VkCommandBufferAllocateInfo staging_cmd_buffer_alloc_info = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .commandPool = staging_cmd_pool,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1
+        };
+        VkCommandBuffer staging_cmd_buffer;
+        vkAllocateCommandBuffers(*vk_device, &staging_cmd_buffer_alloc_info, &staging_cmd_buffer);
+
+        const VkCommandBufferBeginInfo staging_cmd_buffer_begin_info = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+        };
+        vkBeginCommandBuffer(staging_cmd_buffer, &staging_cmd_buffer_begin_info);
+        VkBufferCopy region{ 0, 0, buffer_size };
+        vkCmdCopyBuffer(staging_cmd_buffer, staging_buffer, vk_vertex_buffer, 1, &region);
+        vkEndCommandBuffer(staging_cmd_buffer);
+        
+        const VkSubmitInfo staging_submit_info = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &staging_cmd_buffer,
+        };
+        vkQueueSubmit(vk_queue, 1, &staging_submit_info, VK_NULL_HANDLE);
+        vkQueueWaitIdle(vk_queue);
+
+        vkFreeCommandBuffers(*vk_device, staging_cmd_pool, 1, &staging_cmd_buffer);
+        vmaDestroyBuffer(vma_allocator, staging_buffer, staging_alloc);
+    }
+
+    vkDestroyCommandPool(*vk_device, staging_cmd_pool, nullptr);
 
     VkCommandPoolCreateInfo cmd_pool_create_info = {};
     cmd_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -380,18 +517,13 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 SDL_AppResult SDL_AppIterate(void* appstate) {
     vk_draw_fences[frame_index].wait();
 
-    uint32_t image_index = 0;
-    VkResult result = vkAcquireNextImageKHR(*vk_device, *vk_swapchain, std::numeric_limits<uint64_t>::max(), vk_present_semaphores[frame_index], VK_NULL_HANDLE, &image_index);
-    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+    vkutils::Swapchain::NextImage next_image = vk_swapchain->acquire_next_image(vk_present_semaphores[frame_index]);
+    if (next_image.should_recreate_swapchain) {
         recreate_swapchain();
         return SDL_APP_CONTINUE;
     }
-    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-        std::println(std::cerr, "Failed to acquire swapchain image.");
-        return SDL_APP_FAILURE;
-    }
 
-    record_cmd_buffer(vk_swapchain->get_image(image_index), vk_swapchain->get_image_view(image_index));
+    record_cmd_buffer(next_image.image, next_image.image_view);
 
     vk_draw_fences[frame_index].reset();
 
@@ -404,17 +536,17 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &vk_cmd_buffers[frame_index];
     submit_info.signalSemaphoreCount = 1;
-    submit_info.pSignalSemaphores = vk_render_semaphores[image_index].ptr();
+    submit_info.pSignalSemaphores = vk_render_semaphores[next_image.image_index].ptr();
     vkQueueSubmit(vk_queue, 1, &submit_info, vk_draw_fences[frame_index]);
 
     VkPresentInfoKHR present_info = {};
     present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     present_info.waitSemaphoreCount = 1;
-    present_info.pWaitSemaphores = vk_render_semaphores[image_index].ptr();
+    present_info.pWaitSemaphores = vk_render_semaphores[next_image.image_index].ptr();
     present_info.swapchainCount = 1;
     present_info.pSwapchains = vk_swapchain->ptr();
-    present_info.pImageIndices = &image_index;
-    result = vkQueuePresentKHR(vk_queue, &present_info);
+    present_info.pImageIndices = &next_image.image_index;
+    VkResult result = vkQueuePresentKHR(vk_queue, &present_info);
     if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
         recreate_swapchain();
     }
@@ -432,8 +564,10 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result) {
     vk_draw_fences.clear();
     vkFreeCommandBuffers(*vk_device, vk_cmd_pool, static_cast<uint32_t>(vk_cmd_buffers.size()), vk_cmd_buffers.data());
     vkDestroyCommandPool(*vk_device, vk_cmd_pool, nullptr);
+    vmaDestroyBuffer(vma_allocator, vk_vertex_buffer, vma_vertex_buffer_alloc);
     vk_pipeline.reset();
     vk_swapchain.reset();
+    vmaDestroyAllocator(vma_allocator);
     vk_device.reset();
     vk_surface.reset();
     vk_instance.reset();

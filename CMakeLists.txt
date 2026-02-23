@@ -12,6 +12,10 @@ find_package (Vulkan REQUIRED)
 
 set(APP_SOURCES
     src/utils/non_copyable.hpp
+    src/vulkan_utils/command_buffer.cpp
+    src/vulkan_utils/command_buffer.hpp
+    src/vulkan_utils/command_pool.cpp
+    src/vulkan_utils/command_pool.hpp
     src/vulkan_utils/device.cpp
     src/vulkan_utils/device.hpp
     src/vulkan_utils/fence.cpp
@@ -31,6 +35,10 @@ set(APP_SOURCES
     src/main.cpp
     src/SDL_surface.cpp
     src/SDL_surface.hpp
+    src/vma_allocator.cpp
+    src/vma_allocator.hpp
+    src/vma_buffer.cpp
+    src/vma_buffer.hpp
 )
 
 add_executable(app

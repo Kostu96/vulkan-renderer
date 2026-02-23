@@ -95,10 +95,15 @@ struct Vertex {
     glm::vec3 color;
 };
 
-const std::array<Vertex, 3> vertices = {
-    Vertex{ {  0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
-    Vertex{ {  0.5f,  0.5f }, { 0.0f, 1.0f, 0.0f } },
-    Vertex{ { -0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } }
+const std::array<Vertex, 4> vertices = {
+    Vertex{ { -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
+    Vertex{ {  0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f } },
+    Vertex{ {  0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } },
+    Vertex{ { -0.5f,  0.5f }, { 1.0f, 1.0f, 0.0f } }
+};
+
+const std::array<uint16_t, 6> indices = {
+    0, 1, 2, 2, 3, 0
 };
 
 SDL_Window* sdl_window = nullptr;
@@ -111,6 +116,7 @@ std::unique_ptr<VMAAllocator> vma_allocator;
 std::unique_ptr<vkutils::Swapchain> vk_swapchain;
 std::unique_ptr<vkutils::Pipeline> vk_pipeline;
 std::unique_ptr<VMABuffer> vma_vertex_buffer;
+std::unique_ptr<VMABuffer> vma_index_buffer;
 std::unique_ptr<vkutils::CommandPool> vk_cmd_pool;
 std::array<VkCommandBuffer, FRAMES_IN_FLIGHT> vk_cmd_buffers;
 std::vector<vkutils::Semaphore> vk_present_semaphores;
@@ -207,7 +213,9 @@ void record_cmd_buffer(VkImage image, VkImageView image_view) {
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, vma_vertex_buffer->ptr(), &offset);
 
-    vkCmdDraw(cmd_buffer, vertices.size(), 1, 0, 0);
+    vkCmdBindIndexBuffer(cmd_buffer, *vma_index_buffer, 0, VK_INDEX_TYPE_UINT16);
+
+    vkCmdDrawIndexed(cmd_buffer, indices.size(), 1, 0, 0, 0);
 
     vkCmdEndRendering(cmd_buffer);
     
@@ -399,20 +407,40 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     auto staging_cmd_pool = std::make_unique<vkutils::CommandPool>(*vk_device, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, vk_queue_family_index);
 
     {
-        const VkDeviceSize buffer_size = vertices.size() * sizeof(Vertex);
-        VMABuffer staging_buffer{ *vma_allocator,
-                                  buffer_size,
-                                  VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                  VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT };
+        const VkDeviceSize vertex_buffer_size = vertices.size() * sizeof(Vertex);
 
-        staging_buffer.copy_memory_to_allocation(vertices.data(), buffer_size);
+        VMABuffer vertex_staging_buffer{ *vma_allocator,
+                                         vertex_buffer_size,
+                                         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT };
 
-        vma_vertex_buffer = std::make_unique<VMABuffer>(*vma_allocator, buffer_size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0);
+        vertex_staging_buffer.copy_memory_to_allocation(vertices.data(), vertex_buffer_size);
+
+        vma_vertex_buffer = std::make_unique<VMABuffer>(*vma_allocator,
+                                                        vertex_buffer_size,
+                                                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                        0);
+
+        const VkDeviceSize index_buffer_size = indices.size() * sizeof(uint16_t);
+
+        VMABuffer index_staging_buffer{ *vma_allocator,
+                                         index_buffer_size,
+                                         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT };
+
+        index_staging_buffer.copy_memory_to_allocation(indices.data(), index_buffer_size);
+
+        vma_index_buffer = std::make_unique<VMABuffer>(*vma_allocator,
+                                                       index_buffer_size,
+                                                       VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                       0);
 
         auto staging_cmd_buffer = staging_cmd_pool->allocate_command_buffer();
         staging_cmd_buffer->begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-        VkBufferCopy region{ 0, 0, buffer_size };
-        vkCmdCopyBuffer(*staging_cmd_buffer, staging_buffer, *vma_vertex_buffer, 1, &region);
+        VkBufferCopy vertex_region{ 0, 0, vertex_buffer_size };
+        vkCmdCopyBuffer(*staging_cmd_buffer, vertex_staging_buffer, *vma_vertex_buffer, 1, &vertex_region);
+        VkBufferCopy index_region{ 0, 0, index_buffer_size };
+        vkCmdCopyBuffer(*staging_cmd_buffer, index_staging_buffer, *vma_index_buffer, 1, &index_region);
         staging_cmd_buffer->end();
         
         const VkSubmitInfo staging_submit_info = {
@@ -504,6 +532,7 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result) {
     vk_draw_fences.clear();
     vkFreeCommandBuffers(*vk_device, *vk_cmd_pool, static_cast<uint32_t>(vk_cmd_buffers.size()), vk_cmd_buffers.data());
     vk_cmd_pool.reset();
+    vma_index_buffer.reset();
     vma_vertex_buffer.reset();
     vk_pipeline.reset();
     vk_swapchain.reset();

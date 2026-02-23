@@ -1,5 +1,12 @@
 #pragma once
-#include <volk/volk.h>
+#include "vulkan_utils/command_buffer.hpp"
+#include "vulkan_utils/command_pool.hpp"
+#include "vulkan_utils/device.hpp"
+#include "vulkan_utils/fence.hpp"
+#include "vulkan_utils/instance.hpp"
+#include "vulkan_utils/pipeline.hpp"
+#include "vulkan_utils/semaphore.hpp"
+#include "vulkan_utils/swapchain.hpp"
 
 #include <vector>
 

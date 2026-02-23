@@ -1,11 +1,7 @@
-#include "vulkan_utils/device.hpp"
-#include "vulkan_utils/fence.hpp"
-#include "vulkan_utils/instance.hpp"
-#include "vulkan_utils/pipeline.hpp"
-#include "vulkan_utils/semaphore.hpp"
-#include "vulkan_utils/swapchain.hpp"
 #include "vulkan_utils/vulkan_utils.hpp"
 #include "SDL_surface.hpp"
+#include "vma_allocator.hpp"
+#include "vma_buffer.hpp"
 
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
@@ -22,10 +18,8 @@
 #include <array>
 #include <fstream>
 #include <iostream>
-#include <memory>
 #include <print>
 #include <ranges>
-#include <vector>
 #include <stdexcept>
 
 constexpr int FRAMES_IN_FLIGHT = 2;
@@ -113,12 +107,11 @@ std::unique_ptr<SDLSurface> vk_surface;
 uint32_t vk_queue_family_index = 0;
 std::unique_ptr<vkutils::Device> vk_device;
 VkQueue vk_queue = VK_NULL_HANDLE;
-VmaAllocator vma_allocator;
+std::unique_ptr<VMAAllocator> vma_allocator;
 std::unique_ptr<vkutils::Swapchain> vk_swapchain;
 std::unique_ptr<vkutils::Pipeline> vk_pipeline;
-VkBuffer vk_vertex_buffer = VK_NULL_HANDLE;
-VmaAllocation vma_vertex_buffer_alloc;
-VkCommandPool vk_cmd_pool = VK_NULL_HANDLE;
+std::unique_ptr<VMABuffer> vma_vertex_buffer;
+std::unique_ptr<vkutils::CommandPool> vk_cmd_pool;
 std::array<VkCommandBuffer, FRAMES_IN_FLIGHT> vk_cmd_buffers;
 std::vector<vkutils::Semaphore> vk_present_semaphores;
 std::vector<vkutils::Semaphore> vk_render_semaphores;
@@ -212,7 +205,7 @@ void record_cmd_buffer(VkImage image, VkImageView image_view) {
     vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
 
     const VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vk_vertex_buffer, &offset);
+    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, vma_vertex_buffer->ptr(), &offset);
 
     vkCmdDraw(cmd_buffer, vertices.size(), 1, 0, 0);
 
@@ -346,16 +339,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
 
-    VmaAllocatorCreateInfo vma_allocator_create_info = {
-        .physicalDevice = vk_device->get_physical_device(),
-        .device = *vk_device,
-        .instance = *vk_instance,
-        .vulkanApiVersion = app_info.apiVersion
-    };
-    VmaVulkanFunctions vulkan_functions;
-    result = vmaImportVulkanFunctionsFromVolk(&vma_allocator_create_info, &vulkan_functions);
-    vma_allocator_create_info.pVulkanFunctions = &vulkan_functions;
-    result = vmaCreateAllocator(&vma_allocator_create_info, &vma_allocator);
+    vma_allocator = std::make_unique<VMAAllocator>(*vk_instance, *vk_device, app_info.apiVersion);
 
     vk_surface_caps = vkutils::get_physical_device_surface_capabilities(physical_device, *vk_surface);
     auto surface_formats = vkutils::get_physical_device_surface_formats(physical_device, *vk_surface);
@@ -412,83 +396,39 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
 
     vkDestroyShaderModule(*vk_device, vk_shader_module, nullptr);
 
-    const VkCommandPoolCreateInfo staging_cmd_pool_create_info = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
-        .queueFamilyIndex = vk_queue_family_index
-    };
-    VkCommandPool staging_cmd_pool;
-    vkCreateCommandPool(*vk_device, &staging_cmd_pool_create_info, nullptr, &staging_cmd_pool);
+    auto staging_cmd_pool = std::make_unique<vkutils::CommandPool>(*vk_device, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, vk_queue_family_index);
 
     {
         const VkDeviceSize buffer_size = vertices.size() * sizeof(Vertex);
+        VMABuffer staging_buffer{ *vma_allocator,
+                                  buffer_size,
+                                  VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                  VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT };
 
-        const VkBufferCreateInfo staging_create_info = {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .size = buffer_size,
-            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT
-        };
-        const VmaAllocationCreateInfo staging_alloc_create_info = {
-            .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
-            .usage = VMA_MEMORY_USAGE_AUTO
-        };
-        VkBuffer staging_buffer;
-        VmaAllocation staging_alloc;
-        vmaCreateBuffer(vma_allocator, &staging_create_info, &staging_alloc_create_info, &staging_buffer, &staging_alloc, nullptr);
+        staging_buffer.copy_memory_to_allocation(vertices.data(), buffer_size);
 
-        vmaCopyMemoryToAllocation(vma_allocator, vertices.data(), staging_alloc, 0, buffer_size);
+        vma_vertex_buffer = std::make_unique<VMABuffer>(*vma_allocator, buffer_size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0);
 
-        const VkBufferCreateInfo buffer_create_info = {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .size = buffer_size,
-            .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
-        };
-        const VmaAllocationCreateInfo alloc_create_info = {
-            .usage = VMA_MEMORY_USAGE_AUTO
-        };
-        vmaCreateBuffer(vma_allocator, &buffer_create_info, &alloc_create_info, &vk_vertex_buffer, &vma_vertex_buffer_alloc, nullptr);
-
-        const VkCommandBufferAllocateInfo staging_cmd_buffer_alloc_info = {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .commandPool = staging_cmd_pool,
-            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            .commandBufferCount = 1
-        };
-        VkCommandBuffer staging_cmd_buffer;
-        vkAllocateCommandBuffers(*vk_device, &staging_cmd_buffer_alloc_info, &staging_cmd_buffer);
-
-        const VkCommandBufferBeginInfo staging_cmd_buffer_begin_info = {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-        };
-        vkBeginCommandBuffer(staging_cmd_buffer, &staging_cmd_buffer_begin_info);
+        auto staging_cmd_buffer = staging_cmd_pool->allocate_command_buffer();
+        staging_cmd_buffer->begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
         VkBufferCopy region{ 0, 0, buffer_size };
-        vkCmdCopyBuffer(staging_cmd_buffer, staging_buffer, vk_vertex_buffer, 1, &region);
-        vkEndCommandBuffer(staging_cmd_buffer);
+        vkCmdCopyBuffer(*staging_cmd_buffer, staging_buffer, *vma_vertex_buffer, 1, &region);
+        staging_cmd_buffer->end();
         
         const VkSubmitInfo staging_submit_info = {
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .commandBufferCount = 1,
-            .pCommandBuffers = &staging_cmd_buffer,
+            .pCommandBuffers = staging_cmd_buffer->ptr(),
         };
         vkQueueSubmit(vk_queue, 1, &staging_submit_info, VK_NULL_HANDLE);
         vkQueueWaitIdle(vk_queue);
-
-        vkFreeCommandBuffers(*vk_device, staging_cmd_pool, 1, &staging_cmd_buffer);
-        vmaDestroyBuffer(vma_allocator, staging_buffer, staging_alloc);
     }
 
-    vkDestroyCommandPool(*vk_device, staging_cmd_pool, nullptr);
-
-    VkCommandPoolCreateInfo cmd_pool_create_info = {};
-    cmd_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    cmd_pool_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    cmd_pool_create_info.queueFamilyIndex = vk_queue_family_index;
-    vkCreateCommandPool(*vk_device, &cmd_pool_create_info, nullptr, &vk_cmd_pool);
+    vk_cmd_pool = std::make_unique<vkutils::CommandPool>(*vk_device, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, vk_queue_family_index);
 
     VkCommandBufferAllocateInfo cmd_buffer_alloc_info = {};
     cmd_buffer_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmd_buffer_alloc_info.commandPool = vk_cmd_pool;
+    cmd_buffer_alloc_info.commandPool = *vk_cmd_pool;
     cmd_buffer_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     cmd_buffer_alloc_info.commandBufferCount = FRAMES_IN_FLIGHT;
     vkAllocateCommandBuffers(*vk_device, &cmd_buffer_alloc_info, vk_cmd_buffers.data());
@@ -562,16 +502,15 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result) {
     vk_render_semaphores.clear();
     vk_present_semaphores.clear();
     vk_draw_fences.clear();
-    vkFreeCommandBuffers(*vk_device, vk_cmd_pool, static_cast<uint32_t>(vk_cmd_buffers.size()), vk_cmd_buffers.data());
-    vkDestroyCommandPool(*vk_device, vk_cmd_pool, nullptr);
-    vmaDestroyBuffer(vma_allocator, vk_vertex_buffer, vma_vertex_buffer_alloc);
+    vkFreeCommandBuffers(*vk_device, *vk_cmd_pool, static_cast<uint32_t>(vk_cmd_buffers.size()), vk_cmd_buffers.data());
+    vk_cmd_pool.reset();
+    vma_vertex_buffer.reset();
     vk_pipeline.reset();
     vk_swapchain.reset();
-    vmaDestroyAllocator(vma_allocator);
+    vma_allocator.reset();
     vk_device.reset();
     vk_surface.reset();
     vk_instance.reset();
 
     SDL_DestroyWindow(sdl_window);
-    SDL_Quit();
 }

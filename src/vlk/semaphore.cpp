@@ -1,5 +1,5 @@
-#include "vulkan_utils/semaphore.hpp"
-#include "vulkan_utils/device.hpp"
+#include "vlk/semaphore.hpp"
+#include "vlk/device.hpp"
 
 #include <stdexcept>
 

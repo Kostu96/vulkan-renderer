@@ -1,5 +1,5 @@
-#include "SDL_surface.hpp"
-#include "vulkan_utils/instance.hpp"
+#include "vlk/surface.hpp"
+#include "vlk/instance.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 
@@ -7,7 +7,9 @@
 #include <limits>
 #include <stdexcept>
 
-SDLSurface::SDLSurface(SDL_Window* window, const vlk::Instance& instance) :
+namespace vlk {
+
+Surface::Surface(SDL_Window* window, const Instance& instance) :
     window_{ window },
     instance_{ instance }
 {
@@ -16,19 +18,19 @@ SDLSurface::SDLSurface(SDL_Window* window, const vlk::Instance& instance) :
     }
 }
 
-SDLSurface::SDLSurface(SDLSurface &&other) noexcept :
+Surface::Surface(Surface&& other) noexcept :
     window_{ other.window_ },
     instance_{ other.instance_ },
     handle_{ other.handle_ }
 {
-    other.handle_ = VK_NULL_HANDLE;        
+    other.handle_ = VK_NULL_HANDLE;
 }
 
-SDLSurface::~SDLSurface() {
+Surface::~Surface() {
     SDL_Vulkan_DestroySurface(instance_, handle_, nullptr);
 }
 
-VkExtent2D SDLSurface::get_extent(const VkSurfaceCapabilitiesKHR& surface_caps) const {
+VkExtent2D Surface::get_extent(const VkSurfaceCapabilitiesKHR& surface_caps) const {
     if (surface_caps.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
         return surface_caps.currentExtent;
     }
@@ -40,4 +42,6 @@ VkExtent2D SDLSurface::get_extent(const VkSurfaceCapabilitiesKHR& surface_caps) 
         std::clamp<uint32_t>(width, surface_caps.minImageExtent.width, surface_caps.maxImageExtent.width),
         std::clamp<uint32_t>(height, surface_caps.minImageExtent.height, surface_caps.maxImageExtent.height)
     };
+}
+
 }

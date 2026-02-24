@@ -24,7 +24,7 @@ public:
 
     ~Swapchain();
 
-    VkSwapchainKHR* ptr() noexcept { return &handle_; }
+    const VkSwapchainKHR* ptr() const noexcept { return &handle_; }
 
     uint32_t get_image_count() const noexcept { return static_cast<uint32_t>(images_.size()); }
 

@@ -18,7 +18,7 @@ public:
     void begin(VkCommandBufferUsageFlags flags) const;
     void end() const;
 
-    VkCommandBuffer* ptr() noexcept { return &handle_; }
+    const VkCommandBuffer* ptr() const noexcept { return &handle_; }
 
     operator VkCommandBuffer() const noexcept { return handle_; }
 private:

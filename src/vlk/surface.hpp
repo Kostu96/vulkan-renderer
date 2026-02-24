@@ -9,22 +9,22 @@ namespace vlk {
 
 class Instance;
 
-}
-
-class SDLSurface final :
+class Surface final :
     NonCopyable {
 public:
-    SDLSurface(SDL_Window* window, const vlk::Instance& instance);
-    
-    SDLSurface(SDLSurface&& other) noexcept;
+    Surface(SDL_Window* window, const Instance& instance);
 
-    ~SDLSurface();
+    Surface(Surface&& other) noexcept;
+
+    ~Surface();
 
     VkExtent2D get_extent(const VkSurfaceCapabilitiesKHR& surface_caps) const;
 
     operator VkSurfaceKHR() const noexcept { return handle_; }
 private:
     SDL_Window* window_ = nullptr;
-    const vlk::Instance& instance_;
+    const Instance& instance_;
     VkSurfaceKHR handle_ = VK_NULL_HANDLE;
 };
+
+}

@@ -16,7 +16,7 @@ public:
 
     ~Semaphore();
 
-    VkSemaphore* ptr() noexcept { return &handle_; }
+    const VkSemaphore* ptr() const noexcept { return &handle_; }
 
     operator VkSemaphore() const noexcept { return handle_; }
 private:

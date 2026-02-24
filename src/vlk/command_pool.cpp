@@ -1,6 +1,6 @@
-#include "vulkan_utils/command_pool.hpp"
-#include "vulkan_utils/device.hpp"
-#include "vulkan_utils/command_buffer.hpp"
+#include "vlk/command_pool.hpp"
+#include "vlk/device.hpp"
+#include "vlk/command_buffer.hpp"
 
 #include <stdexcept>
 

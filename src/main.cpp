@@ -1,8 +1,7 @@
 #include "application.hpp"
-#include "SDL_surface.hpp"
 #include "vma_allocator.hpp"
 #include "vma_buffer.hpp"
-#include "vulkan_utils/vlk.hpp"
+#include "vlk/vlk.hpp"
 
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
@@ -91,10 +90,6 @@ const std::array<uint16_t, 6> indices = {
     0, 1, 2, 2, 3, 0
 };
 
-std::unique_ptr<SDLSurface> vk_surface;
-uint32_t vk_queue_family_index = 0;
-std::unique_ptr<vlk::Device> vk_device;
-VkQueue vk_queue = VK_NULL_HANDLE;
 std::unique_ptr<VMAAllocator> vma_allocator;
 std::unique_ptr<vlk::Swapchain> vk_swapchain;
 std::unique_ptr<vlk::Pipeline> vk_pipeline;
@@ -109,46 +104,6 @@ VkSurfaceCapabilitiesKHR vk_surface_caps;
 VkSurfaceFormatKHR vk_surface_format;
 VkExtent2D vk_extent;
 uint32_t frame_index = 0;
-
-vlk::PhysicalDevice choose_physical_device(const vlk::Instance& instance, std::span<const char*> required_extensions) {
-    auto physical_devices = instance.get_physical_devices();
-    for (auto& physical_device : physical_devices) {
-        // TODO(Kostu): Device scoring
-        auto physical_device_props = physical_device.get_properties();
-        auto physical_device_feats = physical_device.get_features();
-        auto physical_device_extensions = physical_device.get_extension_properties();
-        auto queue_family_props = physical_device.get_queue_family_properties();
-
-        bool is_suitable = (physical_device_props.apiVersion >= VK_API_VERSION_1_3);
-
-        bool has_graphics_capable_queue = false;
-        for (auto [idx, queue_family] : std::views::enumerate(queue_family_props)) {
-            if ((queue_family.queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
-                (queue_family.queueFlags & VK_QUEUE_TRANSFER_BIT) &&
-                SDL_Vulkan_GetPresentationSupport(instance, physical_device, idx) &&
-                physical_device.get_surface_support(idx, *vk_surface))
-            {
-                has_graphics_capable_queue = true;
-                vk_queue_family_index = static_cast<uint32_t>(idx);
-                break;
-            }
-        }
-        is_suitable = is_suitable && has_graphics_capable_queue;
-
-        bool found = true;
-        for (auto& extension : required_extensions) {
-            auto it = std::ranges::find_if(physical_device_extensions, [extension](auto& ext) {return strcmp(ext.extensionName, extension) == 0;});
-            found = found && it != physical_device_extensions.end();
-        }
-        is_suitable = is_suitable && found;
-
-        if (is_suitable) {
-            return physical_device;
-        }
-    }
-
-    throw std::runtime_error("Failed to pick Vulkan physical device.");
-}
 
 void record_cmd_buffer(VkImage image, VkImageView image_view) {
     VkCommandBuffer cmd_buffer = vk_cmd_buffers[frame_index];
@@ -214,14 +169,14 @@ void record_cmd_buffer(VkImage image, VkImageView image_view) {
     vkEndCommandBuffer(cmd_buffer);
 }
 
-void recreate_swapchain() {
-    vk_device->wait_idle();
-    vk_extent = vk_surface->get_extent(vk_surface_caps);
-    vk_swapchain = std::make_unique<vlk::Swapchain>(*vk_device, *vk_surface, vk_surface_caps, vk_surface_format, 3u, vk_extent);
+void recreate_swapchain(const vlk::Device& device, const vlk::Surface& surface) {
+    device.wait_idle();
+    vk_extent = surface.get_extent(vk_surface_caps);
+    vk_swapchain = std::make_unique<vlk::Swapchain>(device, surface, vk_surface_caps, vk_surface_format, 3u, vk_extent);
 }
 
-uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags properties) {
-    auto memory_properties = vk_device->get_physical_device().get_memory_properties();
+uint32_t find_memory_type(const vlk::Device device, uint32_t type_filter, VkMemoryPropertyFlags properties) {
+    auto memory_properties = device.get_physical_device().get_memory_properties();
     for (uint32_t i = 0; i < memory_properties.memoryTypeCount; i++) {
         if ((type_filter & (1 << i)) && (memory_properties.memoryTypes[i].propertyFlags & properties) == properties) {
             return i;
@@ -247,50 +202,16 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     Application* app = new Application;
     *appstate = app;
 
-    vk_surface = std::make_unique<SDLSurface>(app->get_window(), app->get_instance());
+    vma_allocator = std::make_unique<VMAAllocator>(app->get_instance(), app->get_device(), VK_API_VERSION_1_4);
 
-    std::vector<const char*> required_device_extensions = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME
-    };
-    auto physical_device = choose_physical_device(app->get_instance(), required_device_extensions);
-    
-    float queue_priority = 1.0f;
-    VkDeviceQueueCreateInfo queue_create_info = {};
-    queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queue_create_info.queueFamilyIndex = vk_queue_family_index;
-    queue_create_info.queueCount = 1;
-    queue_create_info.pQueuePriorities = &queue_priority;
+    auto physical_device = app->get_device().get_physical_device();
 
-    VkPhysicalDeviceVulkan13Features vlk13_features = {};
-    vlk13_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-    vlk13_features.dynamicRendering = VK_TRUE;
-    vlk13_features.synchronization2 = VK_TRUE;
-
-    VkPhysicalDeviceVulkan11Features vlk11_features = {};
-    vlk11_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-    vlk11_features.shaderDrawParameters = VK_TRUE;
-    vlk11_features.pNext = &vlk13_features;
-
-    vk_device = std::make_unique<vlk::Device>(physical_device, std::span{ &queue_create_info, 1 }, required_device_extensions, &vlk11_features);
-
-    VkDeviceQueueInfo2 queue_info = {};
-    queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2;
-    queue_info.queueFamilyIndex = vk_queue_family_index;
-    queue_info.queueIndex = 0;
-    vkGetDeviceQueue2(*vk_device, &queue_info, &vk_queue);
-    if (vk_queue == VK_NULL_HANDLE) {
-        std::println(std::cerr, "Failed to retrieve Vulkan queue.");
-        return SDL_APP_FAILURE;
-    }
-
-    vma_allocator = std::make_unique<VMAAllocator>(app->get_instance(), *vk_device, VK_API_VERSION_1_4);
-
-    vk_surface_caps = physical_device.get_surface_capabilities(*vk_surface);
-    auto surface_formats = physical_device.get_surface_formats(*vk_surface);
+    vk_surface_caps = physical_device.get_surface_capabilities(app->get_surface());
+    auto surface_formats = physical_device.get_surface_formats(app->get_surface());
 
     vk_surface_format = choose_swap_surface_format(surface_formats);
 
-    recreate_swapchain();
+    recreate_swapchain(app->get_device(), app->get_surface());
 
     auto shader_code = read_file("shaders/simple.spv");
     if (shader_code[0] != 0x07230203) {
@@ -303,7 +224,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     shader_module_create_info.codeSize = shader_code.size() * sizeof(uint32_t);
     shader_module_create_info.pCode = shader_code.data();
     VkShaderModule vk_shader_module;
-    vkCreateShaderModule(*vk_device, &shader_module_create_info, nullptr, &vk_shader_module);
+    vkCreateShaderModule(app->get_device(), &shader_module_create_info, nullptr, &vk_shader_module);
 
     std::vector<VkPipelineShaderStageCreateInfo> stages(2);
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -336,11 +257,11 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         }
     };
 
-    vk_pipeline = std::make_unique<vlk::Pipeline>(*vk_device, stages, vk_surface_format.format, vertex_binding_description, vertex_attribute_descriptions);
+    vk_pipeline = std::make_unique<vlk::Pipeline>(app->get_device(), stages, vk_surface_format.format, vertex_binding_description, vertex_attribute_descriptions);
 
-    vkDestroyShaderModule(*vk_device, vk_shader_module, nullptr);
+    vkDestroyShaderModule(app->get_device(), vk_shader_module, nullptr);
 
-    auto staging_cmd_pool = std::make_unique<vlk::CommandPool>(*vk_device, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, vk_queue_family_index);
+    auto staging_cmd_pool = std::make_unique<vlk::CommandPool>(app->get_device(), VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, app->get_queue_family());
 
     {
         const VkDeviceSize vertex_buffer_size = vertices.size() * sizeof(Vertex);
@@ -379,30 +300,25 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         vkCmdCopyBuffer(*staging_cmd_buffer, index_staging_buffer, *vma_index_buffer, 1, &index_region);
         staging_cmd_buffer->end();
         
-        const VkSubmitInfo staging_submit_info = {
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            .commandBufferCount = 1,
-            .pCommandBuffers = staging_cmd_buffer->ptr(),
-        };
-        vkQueueSubmit(vk_queue, 1, &staging_submit_info, VK_NULL_HANDLE);
-        vkQueueWaitIdle(vk_queue);
+        app->get_queue().submit(*staging_cmd_buffer);
+        app->get_queue().wait_idle();
     }
 
-    vk_cmd_pool = std::make_unique<vlk::CommandPool>(*vk_device, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, vk_queue_family_index);
+    vk_cmd_pool = std::make_unique<vlk::CommandPool>(app->get_device(), VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, app->get_queue_family());
 
     VkCommandBufferAllocateInfo cmd_buffer_alloc_info = {};
     cmd_buffer_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     cmd_buffer_alloc_info.commandPool = *vk_cmd_pool;
     cmd_buffer_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     cmd_buffer_alloc_info.commandBufferCount = FRAMES_IN_FLIGHT;
-    vkAllocateCommandBuffers(*vk_device, &cmd_buffer_alloc_info, vk_cmd_buffers.data());
+    vkAllocateCommandBuffers(app->get_device(), &cmd_buffer_alloc_info, vk_cmd_buffers.data());
 
     for (uint32_t i = 0; i < vk_swapchain->get_image_count(); ++i) {
-        vk_render_semaphores.emplace_back(*vk_device);
+        vk_render_semaphores.emplace_back(app->get_device());
     }
     for (int i = 0; i < FRAMES_IN_FLIGHT; ++i) {
-        vk_present_semaphores.emplace_back(*vk_device);
-        vk_draw_fences.emplace_back(*vk_device, true);
+        vk_present_semaphores.emplace_back(app->get_device());
+        vk_draw_fences.emplace_back(app->get_device(), true);
     }
 
     return SDL_APP_CONTINUE;
@@ -419,11 +335,13 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 }
 
 SDL_AppResult SDL_AppIterate(void* appstate) {
+    Application* app = static_cast<Application*>(appstate);
+
     vk_draw_fences[frame_index].wait();
 
     auto next_image = vk_swapchain->acquire_next_image(vk_present_semaphores[frame_index]);
     if (next_image.should_recreate_swapchain) {
-        recreate_swapchain();
+        recreate_swapchain(app->get_device(), app->get_surface());
         return SDL_APP_CONTINUE;
     }
 
@@ -431,28 +349,14 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 
     vk_draw_fences[frame_index].reset();
 
-    const VkPipelineStageFlags wait_destination_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkSubmitInfo submit_info = {};
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info.waitSemaphoreCount = 1;
-    submit_info.pWaitSemaphores = vk_present_semaphores[frame_index].ptr();
-    submit_info.pWaitDstStageMask = &wait_destination_stage;
-    submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &vk_cmd_buffers[frame_index];
-    submit_info.signalSemaphoreCount = 1;
-    submit_info.pSignalSemaphores = vk_render_semaphores[next_image.image_index].ptr();
-    vkQueueSubmit(vk_queue, 1, &submit_info, vk_draw_fences[frame_index]);
+    app->get_queue().submit(vk_cmd_buffers[frame_index],
+                            &vk_present_semaphores[frame_index],
+                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                            &vk_render_semaphores[next_image.image_index],
+                            &vk_draw_fences[frame_index]);
 
-    VkPresentInfoKHR present_info = {};
-    present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    present_info.waitSemaphoreCount = 1;
-    present_info.pWaitSemaphores = vk_render_semaphores[next_image.image_index].ptr();
-    present_info.swapchainCount = 1;
-    present_info.pSwapchains = vk_swapchain->ptr();
-    present_info.pImageIndices = &next_image.image_index;
-    VkResult result = vkQueuePresentKHR(vk_queue, &present_info);
-    if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
-        recreate_swapchain();
+    if (app->get_queue().present(*vk_swapchain, vk_render_semaphores[next_image.image_index], next_image.image_index)) {
+        recreate_swapchain(app->get_device(), app->get_surface());
     }
 
     frame_index = (frame_index + 1) % FRAMES_IN_FLIGHT;
@@ -461,21 +365,20 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 }
 
 void SDL_AppQuit(void* appstate, SDL_AppResult result) {
-    vk_device->wait_idle();
+    Application* app = static_cast<Application*>(appstate);
+
+    app->get_device().wait_idle();
 
     vk_render_semaphores.clear();
     vk_present_semaphores.clear();
     vk_draw_fences.clear();
-    vkFreeCommandBuffers(*vk_device, *vk_cmd_pool, static_cast<uint32_t>(vk_cmd_buffers.size()), vk_cmd_buffers.data());
+    vkFreeCommandBuffers(app->get_device(), *vk_cmd_pool, static_cast<uint32_t>(vk_cmd_buffers.size()), vk_cmd_buffers.data());
     vk_cmd_pool.reset();
     vma_index_buffer.reset();
     vma_vertex_buffer.reset();
     vk_pipeline.reset();
     vk_swapchain.reset();
     vma_allocator.reset();
-    vk_device.reset();
-    vk_surface.reset();
 
-    Application* app = static_cast<Application*>(appstate);
     delete app;
 }

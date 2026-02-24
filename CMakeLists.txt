@@ -12,32 +12,34 @@ find_package (Vulkan REQUIRED)
 
 set(APP_SOURCES
     src/utils/non_copyable.hpp
-    src/vulkan_utils/command_buffer.cpp
-    src/vulkan_utils/command_buffer.hpp
-    src/vulkan_utils/command_pool.cpp
-    src/vulkan_utils/command_pool.hpp
-    src/vulkan_utils/device.cpp
-    src/vulkan_utils/device.hpp
-    src/vulkan_utils/fence.cpp
-    src/vulkan_utils/fence.hpp
-    src/vulkan_utils/instance.cpp
-    src/vulkan_utils/instance.hpp
-    src/vulkan_utils/physical_device.cpp
-    src/vulkan_utils/physical_device.hpp
-    src/vulkan_utils/pipeline.cpp
-    src/vulkan_utils/pipeline.hpp
-    src/vulkan_utils/semaphore.cpp
-    src/vulkan_utils/semaphore.hpp
-    src/vulkan_utils/swapchain.cpp
-    src/vulkan_utils/swapchain.hpp
-    src/vulkan_utils/vlk.hpp
-    src/vulkan_utils/vma.cpp
-    src/vulkan_utils/volk.cpp
+    src/vlk/command_buffer.cpp
+    src/vlk/command_buffer.hpp
+    src/vlk/command_pool.cpp
+    src/vlk/command_pool.hpp
+    src/vlk/device.cpp
+    src/vlk/device.hpp
+    src/vlk/fence.cpp
+    src/vlk/fence.hpp
+    src/vlk/instance.cpp
+    src/vlk/instance.hpp
+    src/vlk/physical_device.cpp
+    src/vlk/physical_device.hpp
+    src/vlk/pipeline.cpp
+    src/vlk/pipeline.hpp
+    src/vlk/queue.cpp
+    src/vlk/queue.hpp
+    src/vlk/semaphore.cpp
+    src/vlk/semaphore.hpp
+    src/vlk/surface.cpp
+    src/vlk/surface.hpp
+    src/vlk/swapchain.cpp
+    src/vlk/swapchain.hpp
+    src/vlk/vlk.hpp
+    src/vlk/vma.cpp
+    src/vlk/volk.cpp
     src/application.cpp
     src/application.hpp
     src/main.cpp
-    src/SDL_surface.cpp
-    src/SDL_surface.hpp
     src/vma_allocator.cpp
     src/vma_allocator.hpp
     src/vma_buffer.cpp

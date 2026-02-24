@@ -1,5 +1,5 @@
-#include "vulkan_utils/fence.hpp"
-#include "vulkan_utils/device.hpp"
+#include "vlk/fence.hpp"
+#include "vlk/device.hpp"
 
 #include <stdexcept>
 

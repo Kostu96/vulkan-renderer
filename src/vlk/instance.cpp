@@ -1,5 +1,5 @@
-#include "vulkan_utils/instance.hpp"
-#include "vulkan_utils/physical_device.hpp"
+#include "vlk/instance.hpp"
+#include "vlk/physical_device.hpp"
 
 #include <algorithm>
 #include <iostream>

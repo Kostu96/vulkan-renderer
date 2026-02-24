@@ -1,7 +1,7 @@
-#include "vulkan_utils/swapchain.hpp"
-#include "vulkan_utils/device.hpp"
-#include "vulkan_utils/physical_device.hpp"
-#include "vulkan_utils/semaphore.hpp"
+#include "vlk/swapchain.hpp"
+#include "vlk/device.hpp"
+#include "vlk/physical_device.hpp"
+#include "vlk/semaphore.hpp"
 
 #include <algorithm>
 #include <stdexcept>

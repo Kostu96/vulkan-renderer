@@ -1,5 +1,5 @@
-#include "vulkan_utils/pipeline.hpp"
-#include "vulkan_utils/device.hpp"
+#include "vlk/pipeline.hpp"
+#include "vlk/device.hpp"
 
 #include <stdexcept>
 #include <vector>

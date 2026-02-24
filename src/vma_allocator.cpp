@@ -1,11 +1,12 @@
 #include "vma_allocator.hpp"
 #include "vulkan_utils/device.hpp"
 #include "vulkan_utils/instance.hpp"
+#include "vulkan_utils/physical_device.hpp"
 
 #include <stdexcept>
 
-VMAAllocator::VMAAllocator(const vkutils::Instance& instance,
-                           const vkutils::Device& device,
+VMAAllocator::VMAAllocator(const vlk::Instance& instance,
+                           const vlk::Device& device,
                            uint32_t api_version) {
     VmaAllocatorCreateInfo create_info = {
         .physicalDevice = device.get_physical_device(),

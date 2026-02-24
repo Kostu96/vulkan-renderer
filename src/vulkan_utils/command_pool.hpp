@@ -5,7 +5,7 @@
 
 #include <memory>
 
-namespace vkutils {
+namespace vlk {
 
 class Device;
 class CommandBuffer;

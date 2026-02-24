@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace vkutils {
+namespace vlk {
 
 Pipeline::Pipeline(const Device& device,
                    std::span<const VkPipelineShaderStageCreateInfo> stages,

@@ -4,7 +4,7 @@
 
 #include <stdexcept>
 
-namespace vkutils {
+namespace vlk {
 
 CommandBuffer::CommandBuffer(const Device& device, const CommandPool& cmd_pool) :
     device_{ device },

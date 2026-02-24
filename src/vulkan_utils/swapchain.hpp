@@ -5,7 +5,7 @@
 
 #include <vector>
 
-namespace vkutils {
+namespace vlk {
 
 class Device;
 class Semaphore;
@@ -27,10 +27,6 @@ public:
     VkSwapchainKHR* ptr() noexcept { return &handle_; }
 
     uint32_t get_image_count() const noexcept { return static_cast<uint32_t>(images_.size()); }
-
-    /*VkImage get_image(uint32_t index) const noexcept { return images_[index]; }
-
-    VkImageView get_image_view(uint32_t index) const noexcept { return image_views_[index]; }*/
 
     struct NextImage {
         VkImage image;

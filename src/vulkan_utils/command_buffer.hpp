@@ -3,7 +3,7 @@
 
 #include <volk/volk.h>
 
-namespace vkutils {
+namespace vlk {
 
 class CommandPool;
 class Device;

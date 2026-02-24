@@ -3,7 +3,7 @@
 
 #include <stdexcept>
 
-namespace vkutils {
+namespace vlk {
 
 Semaphore::Semaphore(const Device& device) :
     device_{ device }

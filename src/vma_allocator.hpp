@@ -6,7 +6,7 @@
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
 #include <vma/vk_mem_alloc.h>
 
-namespace vkutils {
+namespace vlk {
 
 class Device;
 class Instance;
@@ -16,8 +16,8 @@ class Instance;
 class VMAAllocator final :
     NonCopyable {
 public:
-    VMAAllocator(const vkutils::Instance& instance,
-                 const vkutils::Device& device,
+    VMAAllocator(const vlk::Instance& instance,
+                 const vlk::Device& device,
                  uint32_t api_version);
 
     ~VMAAllocator();

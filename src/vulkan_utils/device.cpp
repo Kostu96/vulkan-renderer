@@ -1,10 +1,11 @@
 #include "vulkan_utils/device.hpp"
+#include "vulkan_utils/physical_device.hpp"
 
 #include <stdexcept>
 
-namespace vkutils {
+namespace vlk {
 
-Device::Device(VkPhysicalDevice physical_device,
+Device::Device(const PhysicalDevice& physical_device,
                std::span<VkDeviceQueueCreateInfo> queues,
                std::span<const char*> extensions,
                const void* next) :

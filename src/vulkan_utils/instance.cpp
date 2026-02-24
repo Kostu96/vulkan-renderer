@@ -1,8 +1,9 @@
 #include "vulkan_utils/instance.hpp"
-#include "vulkan_utils/vulkan_utils.hpp"
+#include "vulkan_utils/physical_device.hpp"
 
 #include <algorithm>
 #include <iostream>
+#include <format>
 #include <print>
 #include <stdexcept>
 #include <string.h>
@@ -20,11 +21,29 @@ dbg_callback(VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
 
 }
 
-namespace vkutils {
+namespace vlk {
 
 Instance::Instance(const VkApplicationInfo& app_info,
-                   std::span<const char*> extensions,
-                   std::span<const char*> layers) {
+                   const std::vector<const char*>& extensions,
+                   const std::vector<const char*>& layers) {
+    auto instance_extension_props = get_extension_properties();
+    for (auto& extension : extensions) {
+        if (std::ranges::none_of(instance_extension_props,
+            [extension](auto& extension_prop) {
+                return strcmp(extension_prop.extensionName, extension) == 0; })) {
+            throw std::runtime_error(std::format("Required Vulkan extension is not supported: {}.", extension));
+        }
+    }
+
+    auto instance_layer_props = get_layer_properties();
+    for (auto& layer : layers) {
+        if (std::ranges::none_of(instance_layer_props,
+            [layer](auto& layer_prop) {
+                return strcmp(layer_prop.layerName, layer) == 0; })) {
+            throw std::runtime_error(std::format("Required Vulkan layer is not supported: {}.", layer));
+        }
+    }
+
     const VkInstanceCreateInfo create_info = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &app_info,
@@ -65,17 +84,23 @@ Instance::~Instance() {
     vkDestroyInstance(handle_, nullptr);
 }
 
-std::vector<VkPhysicalDevice> Instance::get_physical_devices() const {
+std::vector<PhysicalDevice> Instance::get_physical_devices() const {
     uint32_t count = 0;
     VkResult result = vkEnumeratePhysicalDevices(handle_, &count, nullptr);
     if (result != VK_SUCCESS) {
         throw std::runtime_error{ "Failed to query physical devices count." };
     }
 
-    std::vector<VkPhysicalDevice> physical_devices{ count };
-    result = vkEnumeratePhysicalDevices(handle_, &count, physical_devices.data());
+    std::vector<VkPhysicalDevice> vk_handles{ count };
+    result = vkEnumeratePhysicalDevices(handle_, &count, vk_handles.data());
     if (result != VK_SUCCESS) {
         throw std::runtime_error{ "Failed to enumerate physical devices." };
+    }
+
+    std::vector<PhysicalDevice> physical_devices;
+    physical_devices.reserve(count);
+    for (VkPhysicalDevice handle : vk_handles) {
+        physical_devices.push_back(PhysicalDevice{ handle });
     }
 
     return physical_devices;

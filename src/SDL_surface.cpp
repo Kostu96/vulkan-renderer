@@ -7,7 +7,7 @@
 #include <limits>
 #include <stdexcept>
 
-SDLSurface::SDLSurface(SDL_Window* window, const vkutils::Instance& instance) :
+SDLSurface::SDLSurface(SDL_Window* window, const vlk::Instance& instance) :
     window_{ window },
     instance_{ instance }
 {
@@ -40,14 +40,4 @@ VkExtent2D SDLSurface::get_extent(const VkSurfaceCapabilitiesKHR& surface_caps) 
         std::clamp<uint32_t>(width, surface_caps.minImageExtent.width, surface_caps.maxImageExtent.width),
         std::clamp<uint32_t>(height, surface_caps.minImageExtent.height, surface_caps.maxImageExtent.height)
     };
-}
-
-bool SDLSurface::presentation_support(VkPhysicalDevice physical_device, uint32_t queue_family_index) const {
-    VkBool32 support;
-    VkResult result = vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, queue_family_index, handle_, &support);
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error{ "Failed to get presentation support." };
-    }
-    
-    return support == VK_TRUE;
 }

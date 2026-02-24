@@ -1,12 +1,12 @@
 #include "vulkan_utils/swapchain.hpp"
 #include "vulkan_utils/device.hpp"
+#include "vulkan_utils/physical_device.hpp"
 #include "vulkan_utils/semaphore.hpp"
-#include "vulkan_utils/vulkan_utils.hpp"
 
 #include <algorithm>
 #include <stdexcept>
 
-namespace vkutils {
+namespace vlk {
 
 Swapchain::Swapchain(const Device& device,
                      VkSurfaceKHR surface,
@@ -21,7 +21,7 @@ Swapchain::Swapchain(const Device& device,
 
     auto physical_device = device.get_physical_device();
     
-    auto present_modes = get_physical_device_surface_present_modes(physical_device, surface);
+    auto present_modes = physical_device.get_surface_present_modes(surface);
     VkPresentModeKHR present_mode = [&present_modes](){
         if (std::ranges::any_of(present_modes,
                                 [](auto& mode){ return mode == VK_PRESENT_MODE_MAILBOX_KHR; })) {

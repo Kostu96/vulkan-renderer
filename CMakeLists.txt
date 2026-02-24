@@ -22,16 +22,19 @@ set(APP_SOURCES
     src/vulkan_utils/fence.hpp
     src/vulkan_utils/instance.cpp
     src/vulkan_utils/instance.hpp
+    src/vulkan_utils/physical_device.cpp
+    src/vulkan_utils/physical_device.hpp
     src/vulkan_utils/pipeline.cpp
     src/vulkan_utils/pipeline.hpp
     src/vulkan_utils/semaphore.cpp
     src/vulkan_utils/semaphore.hpp
     src/vulkan_utils/swapchain.cpp
     src/vulkan_utils/swapchain.hpp
+    src/vulkan_utils/vlk.hpp
     src/vulkan_utils/vma.cpp
     src/vulkan_utils/volk.cpp
-    src/vulkan_utils/vulkan_utils.cpp
-    src/vulkan_utils/vulkan_utils.hpp
+    src/application.cpp
+    src/application.hpp
     src/main.cpp
     src/SDL_surface.cpp
     src/SDL_surface.hpp

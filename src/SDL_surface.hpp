@@ -5,7 +5,7 @@
 
 struct SDL_Window;
 
-namespace vkutils {
+namespace vlk {
 
 class Instance;
 
@@ -14,7 +14,7 @@ class Instance;
 class SDLSurface final :
     NonCopyable {
 public:
-    SDLSurface(SDL_Window* window, const vkutils::Instance& instance);
+    SDLSurface(SDL_Window* window, const vlk::Instance& instance);
     
     SDLSurface(SDLSurface&& other) noexcept;
 
@@ -22,11 +22,9 @@ public:
 
     VkExtent2D get_extent(const VkSurfaceCapabilitiesKHR& surface_caps) const;
 
-    bool presentation_support(VkPhysicalDevice physical_device, uint32_t queue_family_index) const;
-
     operator VkSurfaceKHR() const noexcept { return handle_; }
 private:
     SDL_Window* window_ = nullptr;
-    const vkutils::Instance& instance_;
+    const vlk::Instance& instance_;
     VkSurfaceKHR handle_ = VK_NULL_HANDLE;
 };

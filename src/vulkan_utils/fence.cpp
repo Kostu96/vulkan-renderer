@@ -3,7 +3,7 @@
 
 #include <stdexcept>
 
-namespace vkutils {
+namespace vlk {
 
 Fence::Fence(const Device& device, bool signaled) :
     device_{ device }

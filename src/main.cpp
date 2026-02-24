@@ -1,7 +1,8 @@
-#include "vulkan_utils/vulkan_utils.hpp"
+#include "application.hpp"
 #include "SDL_surface.hpp"
 #include "vma_allocator.hpp"
 #include "vma_buffer.hpp"
+#include "vulkan_utils/vlk.hpp"
 
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
@@ -23,22 +24,6 @@
 #include <stdexcept>
 
 constexpr int FRAMES_IN_FLIGHT = 2;
-
-std::vector<const char*> get_required_extensions() {
-    uint32_t sdl_vk_extensions_count = 0;
-    auto sdl_vk_extensions = SDL_Vulkan_GetInstanceExtensions(&sdl_vk_extensions_count);
-
-    std::vector<const char*> extensions{ sdl_vk_extensions_count };
-    for (uint32_t i = 0; i < sdl_vk_extensions_count; ++i) {
-        extensions[i] = sdl_vk_extensions[i];
-    }
-
-#ifndef NDEBUG
-    extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-#endif
-
-    return extensions;
-}
 
 VkSurfaceFormatKHR choose_swap_surface_format(std::span<const VkSurfaceFormatKHR> formats) {
     for (auto& format : formats) {
@@ -106,35 +91,33 @@ const std::array<uint16_t, 6> indices = {
     0, 1, 2, 2, 3, 0
 };
 
-SDL_Window* sdl_window = nullptr;
-std::unique_ptr<vkutils::Instance> vk_instance;
 std::unique_ptr<SDLSurface> vk_surface;
 uint32_t vk_queue_family_index = 0;
-std::unique_ptr<vkutils::Device> vk_device;
+std::unique_ptr<vlk::Device> vk_device;
 VkQueue vk_queue = VK_NULL_HANDLE;
 std::unique_ptr<VMAAllocator> vma_allocator;
-std::unique_ptr<vkutils::Swapchain> vk_swapchain;
-std::unique_ptr<vkutils::Pipeline> vk_pipeline;
-std::unique_ptr<VMABuffer> vma_vertex_buffer;
+std::unique_ptr<vlk::Swapchain> vk_swapchain;
+std::unique_ptr<vlk::Pipeline> vk_pipeline;
+std::unique_ptr<VMABuffer> vma_vertex_buffer; // TODO(Kostu): use one buffer for vertex and index data
 std::unique_ptr<VMABuffer> vma_index_buffer;
-std::unique_ptr<vkutils::CommandPool> vk_cmd_pool;
+std::unique_ptr<vlk::CommandPool> vk_cmd_pool;
 std::array<VkCommandBuffer, FRAMES_IN_FLIGHT> vk_cmd_buffers;
-std::vector<vkutils::Semaphore> vk_present_semaphores;
-std::vector<vkutils::Semaphore> vk_render_semaphores;
-std::vector<vkutils::Fence> vk_draw_fences;
+std::vector<vlk::Semaphore> vk_present_semaphores;
+std::vector<vlk::Semaphore> vk_render_semaphores;
+std::vector<vlk::Fence> vk_draw_fences;
 VkSurfaceCapabilitiesKHR vk_surface_caps;
 VkSurfaceFormatKHR vk_surface_format;
 VkExtent2D vk_extent;
 uint32_t frame_index = 0;
 
-VkPhysicalDevice choose_physical_device(std::span<const char*> required_extensions) {
-    auto physical_devices = vk_instance->get_physical_devices();
+vlk::PhysicalDevice choose_physical_device(const vlk::Instance& instance, std::span<const char*> required_extensions) {
+    auto physical_devices = instance.get_physical_devices();
     for (auto& physical_device : physical_devices) {
         // TODO(Kostu): Device scoring
-        auto physical_device_props = vkutils::get_physical_device_properties(physical_device);
-        auto physical_device_feats = vkutils::get_physical_device_features(physical_device);
-        auto physical_device_extensions = vkutils::get_physical_device_extension_properties(physical_device);
-        auto queue_family_props = vkutils::get_physical_queue_family_properties(physical_device);
+        auto physical_device_props = physical_device.get_properties();
+        auto physical_device_feats = physical_device.get_features();
+        auto physical_device_extensions = physical_device.get_extension_properties();
+        auto queue_family_props = physical_device.get_queue_family_properties();
 
         bool is_suitable = (physical_device_props.apiVersion >= VK_API_VERSION_1_3);
 
@@ -142,8 +125,8 @@ VkPhysicalDevice choose_physical_device(std::span<const char*> required_extensio
         for (auto [idx, queue_family] : std::views::enumerate(queue_family_props)) {
             if ((queue_family.queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
                 (queue_family.queueFlags & VK_QUEUE_TRANSFER_BIT) &&
-                SDL_Vulkan_GetPresentationSupport(*vk_instance, physical_device, idx) &&
-                vk_surface->presentation_support(physical_device, idx))
+                SDL_Vulkan_GetPresentationSupport(instance, physical_device, idx) &&
+                physical_device.get_surface_support(idx, *vk_surface))
             {
                 has_graphics_capable_queue = true;
                 vk_queue_family_index = static_cast<uint32_t>(idx);
@@ -164,7 +147,7 @@ VkPhysicalDevice choose_physical_device(std::span<const char*> required_extensio
         }
     }
 
-    return VK_NULL_HANDLE;
+    throw std::runtime_error("Failed to pick Vulkan physical device.");
 }
 
 void record_cmd_buffer(VkImage image, VkImageView image_view) {
@@ -234,11 +217,11 @@ void record_cmd_buffer(VkImage image, VkImageView image_view) {
 void recreate_swapchain() {
     vk_device->wait_idle();
     vk_extent = vk_surface->get_extent(vk_surface_caps);
-    vk_swapchain = std::make_unique<vkutils::Swapchain>(*vk_device, *vk_surface, vk_surface_caps, vk_surface_format, 3u, vk_extent);
+    vk_swapchain = std::make_unique<vlk::Swapchain>(*vk_device, *vk_surface, vk_surface_caps, vk_surface_format, 3u, vk_extent);
 }
 
 uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags properties) {
-    auto memory_properties = vkutils::get_physical_device_memory_properties(vk_device->get_physical_device());
+    auto memory_properties = vk_device->get_physical_device().get_memory_properties();
     for (uint32_t i = 0; i < memory_properties.memoryTypeCount; i++) {
         if ((type_filter & (1 << i)) && (memory_properties.memoryTypes[i].propertyFlags & properties) == properties) {
             return i;
@@ -255,68 +238,21 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
 
-    sdl_window = SDL_CreateWindow("Vulkan Renderer",
-        1440, 900,
-        SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
-
-    if (sdl_window == nullptr) {
-        std::println(std::cerr, "Window creation failed: {}", SDL_GetError());
-        return SDL_APP_FAILURE;
-    }
-
     VkResult result = volkInitialize();
     if (result != VK_SUCCESS) {
         std::println(std::cerr, "Failed to load Vulkan library.");
         return SDL_APP_FAILURE;
     }
 
-    std::vector<const char*> required_extensions = get_required_extensions();
-    auto instance_extension_props = vkutils::Instance::get_extension_properties();
-    for (auto& extension : required_extensions) {
-        if (std::ranges::none_of(instance_extension_props,
-                                 [extension](auto& extension_prop) {
-                                 return strcmp(extension_prop.extensionName, extension) == 0; })) {
-            std::println(std::cerr, "Required SDL Vulkan extension not supported: {}.", extension);
-            return SDL_APP_FAILURE;
-        }
-    }
+    Application* app = new Application;
+    *appstate = app;
 
-    std::vector<const char*> required_layers;
-#ifndef NDEBUG
-    required_layers.push_back("VK_LAYER_KHRONOS_validation");
-#endif
-
-    auto instance_layer_props = vkutils::Instance::get_layer_properties();
-
-    if (std::ranges::any_of(required_layers,
-                            [&instance_layer_props](auto& required_layer) {
-            return std::ranges::none_of(instance_layer_props,
-                                        [required_layer](auto& layer) {
-                return strcmp(layer.layerName, required_layer) == 0; }); })) {
-        std::println(std::cerr, "One or more required layers are not supported.");
-        return SDL_APP_FAILURE;
-    }
-    
-    const VkApplicationInfo app_info = {
-        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pApplicationName = "Vulkan Renderer",
-        .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
-        .pEngineName = "No Engine",
-        .engineVersion = VK_MAKE_VERSION(1, 0, 0),
-        .apiVersion = VK_API_VERSION_1_4
-    };
-
-    vk_instance = std::make_unique<vkutils::Instance>(app_info, std::span{ required_extensions }, std::span{ required_layers });
-    vk_surface = std::make_unique<SDLSurface>(sdl_window, *vk_instance);
+    vk_surface = std::make_unique<SDLSurface>(app->get_window(), app->get_instance());
 
     std::vector<const char*> required_device_extensions = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
-    auto physical_device = choose_physical_device(required_device_extensions);
-    if (physical_device == VK_NULL_HANDLE) {
-        std::println(std::cerr, "Failed to pick Vulkan physical device.");
-        return SDL_APP_FAILURE;
-    }
+    auto physical_device = choose_physical_device(app->get_instance(), required_device_extensions);
     
     float queue_priority = 1.0f;
     VkDeviceQueueCreateInfo queue_create_info = {};
@@ -335,7 +271,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     vlk11_features.shaderDrawParameters = VK_TRUE;
     vlk11_features.pNext = &vlk13_features;
 
-    vk_device = std::make_unique<vkutils::Device>(physical_device, std::span{ &queue_create_info, 1 }, required_device_extensions, &vlk11_features);
+    vk_device = std::make_unique<vlk::Device>(physical_device, std::span{ &queue_create_info, 1 }, required_device_extensions, &vlk11_features);
 
     VkDeviceQueueInfo2 queue_info = {};
     queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2;
@@ -347,10 +283,10 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
 
-    vma_allocator = std::make_unique<VMAAllocator>(*vk_instance, *vk_device, app_info.apiVersion);
+    vma_allocator = std::make_unique<VMAAllocator>(app->get_instance(), *vk_device, VK_API_VERSION_1_4);
 
-    vk_surface_caps = vkutils::get_physical_device_surface_capabilities(physical_device, *vk_surface);
-    auto surface_formats = vkutils::get_physical_device_surface_formats(physical_device, *vk_surface);
+    vk_surface_caps = physical_device.get_surface_capabilities(*vk_surface);
+    auto surface_formats = physical_device.get_surface_formats(*vk_surface);
 
     vk_surface_format = choose_swap_surface_format(surface_formats);
 
@@ -400,11 +336,11 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         }
     };
 
-    vk_pipeline = std::make_unique<vkutils::Pipeline>(*vk_device, stages, vk_surface_format.format, vertex_binding_description, vertex_attribute_descriptions);
+    vk_pipeline = std::make_unique<vlk::Pipeline>(*vk_device, stages, vk_surface_format.format, vertex_binding_description, vertex_attribute_descriptions);
 
     vkDestroyShaderModule(*vk_device, vk_shader_module, nullptr);
 
-    auto staging_cmd_pool = std::make_unique<vkutils::CommandPool>(*vk_device, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, vk_queue_family_index);
+    auto staging_cmd_pool = std::make_unique<vlk::CommandPool>(*vk_device, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, vk_queue_family_index);
 
     {
         const VkDeviceSize vertex_buffer_size = vertices.size() * sizeof(Vertex);
@@ -452,7 +388,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         vkQueueWaitIdle(vk_queue);
     }
 
-    vk_cmd_pool = std::make_unique<vkutils::CommandPool>(*vk_device, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, vk_queue_family_index);
+    vk_cmd_pool = std::make_unique<vlk::CommandPool>(*vk_device, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, vk_queue_family_index);
 
     VkCommandBufferAllocateInfo cmd_buffer_alloc_info = {};
     cmd_buffer_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -485,7 +421,7 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 SDL_AppResult SDL_AppIterate(void* appstate) {
     vk_draw_fences[frame_index].wait();
 
-    vkutils::Swapchain::NextImage next_image = vk_swapchain->acquire_next_image(vk_present_semaphores[frame_index]);
+    auto next_image = vk_swapchain->acquire_next_image(vk_present_semaphores[frame_index]);
     if (next_image.should_recreate_swapchain) {
         recreate_swapchain();
         return SDL_APP_CONTINUE;
@@ -539,7 +475,7 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result) {
     vma_allocator.reset();
     vk_device.reset();
     vk_surface.reset();
-    vk_instance.reset();
 
-    SDL_DestroyWindow(sdl_window);
+    Application* app = static_cast<Application*>(appstate);
+    delete app;
 }

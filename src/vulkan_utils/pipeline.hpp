@@ -5,7 +5,7 @@
 
 #include <span>
 
-namespace vkutils {
+namespace vlk {
 
 class Device;
 

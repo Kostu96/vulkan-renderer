@@ -4,7 +4,7 @@
 
 #include <stdexcept>
 
-namespace vkutils {
+namespace vlk {
 
 CommandPool::CommandPool(const Device& device,
                          VkCommandPoolCreateFlags flags,

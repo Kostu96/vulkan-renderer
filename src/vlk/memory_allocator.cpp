@@ -1,13 +1,15 @@
-#include "vma_allocator.hpp"
+#include "vlk/memory_allocator.hpp"
 #include "vlk/device.hpp"
 #include "vlk/instance.hpp"
 #include "vlk/physical_device.hpp"
 
 #include <stdexcept>
 
-VMAAllocator::VMAAllocator(const vlk::Instance& instance,
-                           const vlk::Device& device,
-                           uint32_t api_version) {
+namespace vlk {
+
+MemoryAllocator::MemoryAllocator(const Instance& instance,
+                                 const Device& device,
+                                 uint32_t api_version) {
     VmaAllocatorCreateInfo create_info = {
         .physicalDevice = device.get_physical_device(),
         .device = device,
@@ -23,6 +25,8 @@ VMAAllocator::VMAAllocator(const vlk::Instance& instance,
     }
 }
 
-VMAAllocator::~VMAAllocator() {
+MemoryAllocator::~MemoryAllocator() {
     vmaDestroyAllocator(handle_);
+}
+
 }

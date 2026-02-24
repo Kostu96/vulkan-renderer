@@ -6,12 +6,15 @@
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
 #include <vma/vk_mem_alloc.h>
 
-class VMAAllocator;
+namespace vlk {
+
+class MemoryAllocator;
+}
 
 class VMABuffer final :
     NonCopyable {
 public:
-    VMABuffer(const VMAAllocator& allocator,
+    VMABuffer(const vlk::MemoryAllocator& allocator,
               VkDeviceSize size,
               VkBufferUsageFlags usage,
               VmaAllocationCreateFlags flags);
@@ -26,7 +29,7 @@ public:
 
     operator VkBuffer() const noexcept { return buffer_; }
 private:
-    const VMAAllocator& allocator_;
+    const vlk::MemoryAllocator& allocator_;
     VkBuffer buffer_ = VK_NULL_HANDLE;
     VmaAllocation allocation_;
 };

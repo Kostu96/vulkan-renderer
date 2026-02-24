@@ -1,9 +1,9 @@
 #include "vma_buffer.hpp"
-#include "vma_allocator.hpp"
+#include "vlk/memory_allocator.hpp"
 
 #include <stdexcept>
 
-VMABuffer::VMABuffer(const VMAAllocator& allocator,
+VMABuffer::VMABuffer(const vlk::MemoryAllocator& allocator,
                      VkDeviceSize size,
                      VkBufferUsageFlags usage,
                      VmaAllocationCreateFlags flags) :

@@ -14,9 +14,10 @@ public:
     // TODO(Kostu): temp?
     const vlk::Instance& get_instance() const { return vk_instance_; }
     const vlk::Surface& get_surface() const { return vk_surface_; }
-    uint32_t get_queue_family() const { return vk_queue_family_index; }
-    const vlk::Device& get_device() const { return vk_device; }
-    const vlk::Queue& get_queue() const { return vk_queue; }
+    uint32_t get_queue_family() const { return vk_queue_family_index_; }
+    const vlk::Device& get_device() const { return vk_device_; }
+    const vlk::Queue& get_queue() const { return vk_queue_; }
+    const vlk::MemoryAllocator& get_allocator() const { return vk_memory_allocator_; }
 private:
     vlk::PhysicalDevice choose_physical_device_and_queue_family();
     vlk::Device create_device();
@@ -24,7 +25,8 @@ private:
     std::unique_ptr<SDL_Window, void(*)(SDL_Window*)> window_;
     vlk::Instance vk_instance_;
     vlk::Surface vk_surface_;
-    uint32_t vk_queue_family_index;
-    vlk::Device vk_device;
-    vlk::Queue vk_queue;
+    uint32_t vk_queue_family_index_;
+    vlk::Device vk_device_;
+    vlk::Queue vk_queue_;
+    vlk::MemoryAllocator vk_memory_allocator_;
 };

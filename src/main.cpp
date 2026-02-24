@@ -1,5 +1,4 @@
 #include "application.hpp"
-#include "vma_allocator.hpp"
 #include "vma_buffer.hpp"
 #include "vlk/vlk.hpp"
 
@@ -90,7 +89,6 @@ const std::array<uint16_t, 6> indices = {
     0, 1, 2, 2, 3, 0
 };
 
-std::unique_ptr<VMAAllocator> vma_allocator;
 std::unique_ptr<vlk::Swapchain> vk_swapchain;
 std::unique_ptr<vlk::Pipeline> vk_pipeline;
 std::unique_ptr<VMABuffer> vma_vertex_buffer; // TODO(Kostu): use one buffer for vertex and index data
@@ -202,8 +200,6 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     Application* app = new Application;
     *appstate = app;
 
-    vma_allocator = std::make_unique<VMAAllocator>(app->get_instance(), app->get_device(), VK_API_VERSION_1_4);
-
     auto physical_device = app->get_device().get_physical_device();
 
     vk_surface_caps = physical_device.get_surface_capabilities(app->get_surface());
@@ -266,28 +262,28 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     {
         const VkDeviceSize vertex_buffer_size = vertices.size() * sizeof(Vertex);
 
-        VMABuffer vertex_staging_buffer{ *vma_allocator,
+        VMABuffer vertex_staging_buffer{ app->get_allocator(),
                                          vertex_buffer_size,
                                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                                          VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT };
 
         vertex_staging_buffer.copy_memory_to_allocation(vertices.data(), vertex_buffer_size);
 
-        vma_vertex_buffer = std::make_unique<VMABuffer>(*vma_allocator,
+        vma_vertex_buffer = std::make_unique<VMABuffer>(app->get_allocator(),
                                                         vertex_buffer_size,
                                                         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                                         0);
 
         const VkDeviceSize index_buffer_size = indices.size() * sizeof(uint16_t);
 
-        VMABuffer index_staging_buffer{ *vma_allocator,
+        VMABuffer index_staging_buffer{ app->get_allocator(),
                                          index_buffer_size,
                                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                                          VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT };
 
         index_staging_buffer.copy_memory_to_allocation(indices.data(), index_buffer_size);
 
-        vma_index_buffer = std::make_unique<VMABuffer>(*vma_allocator,
+        vma_index_buffer = std::make_unique<VMABuffer>(app->get_allocator(),
                                                        index_buffer_size,
                                                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                                        0);
@@ -378,7 +374,6 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result) {
     vma_vertex_buffer.reset();
     vk_pipeline.reset();
     vk_swapchain.reset();
-    vma_allocator.reset();
 
     delete app;
 }

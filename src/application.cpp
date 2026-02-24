@@ -59,8 +59,9 @@ Application::Application() :
              SDL_DestroyWindow },
     vk_instance_(app_info, get_required_instance_extensions(), get_required_layers()),
     vk_surface_{ window_.get(), vk_instance_ },
-    vk_device{ create_device() },
-    vk_queue{ vk_device.get_queue(vk_queue_family_index) }
+    vk_device_{ create_device() },
+    vk_queue_{ vk_device_.get_queue(vk_queue_family_index_) },
+    vk_memory_allocator_{ vk_instance_, vk_device_, app_info.apiVersion }
 {
     if (!window_) {
         throw std::runtime_error(std::format("Window creation failed: {}", SDL_GetError()));
@@ -86,7 +87,7 @@ vlk::PhysicalDevice Application::choose_physical_device_and_queue_family() {
                 physical_device.get_surface_support(idx, vk_surface_))
             {
                 has_graphics_capable_queue = true;
-                vk_queue_family_index = static_cast<uint32_t>(idx);
+                vk_queue_family_index_ = static_cast<uint32_t>(idx);
                 break;
             }
         }
@@ -113,7 +114,7 @@ vlk::Device Application::create_device() {
     float queue_priority = 1.0f;
     VkDeviceQueueCreateInfo queue_create_info = {};
     queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queue_create_info.queueFamilyIndex = vk_queue_family_index;
+    queue_create_info.queueFamilyIndex = vk_queue_family_index_;
     queue_create_info.queueCount = 1;
     queue_create_info.pQueuePriorities = &queue_priority;
 

@@ -22,6 +22,8 @@ set(APP_SOURCES
     src/vlk/fence.hpp
     src/vlk/instance.cpp
     src/vlk/instance.hpp
+    src/vlk/memory_allocator.cpp
+    src/vlk/memory_allocator.hpp
     src/vlk/physical_device.cpp
     src/vlk/physical_device.hpp
     src/vlk/pipeline.cpp
@@ -36,12 +38,11 @@ set(APP_SOURCES
     src/vlk/swapchain.hpp
     src/vlk/vlk.hpp
     src/vlk/vma.cpp
+    src/vlk/vma.hpp
     src/vlk/volk.cpp
     src/application.cpp
     src/application.hpp
     src/main.cpp
-    src/vma_allocator.cpp
-    src/vma_allocator.hpp
     src/vma_buffer.cpp
     src/vma_buffer.hpp
 )

@@ -4,6 +4,7 @@
 #include "vlk/device.hpp"
 #include "vlk/fence.hpp"
 #include "vlk/instance.hpp"
+#include "vlk/memory_allocator.hpp"
 #include "vlk/physical_device.hpp"
 #include "vlk/pipeline.hpp"
 #include "vlk/queue.hpp"

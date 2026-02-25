@@ -12,6 +12,8 @@ find_package (Vulkan REQUIRED)
 
 set(APP_SOURCES
     src/utils/non_copyable.hpp
+    src/vlk/buffer.cpp
+    src/vlk/buffer.hpp
     src/vlk/command_buffer.cpp
     src/vlk/command_buffer.hpp
     src/vlk/command_pool.cpp
@@ -32,6 +34,8 @@ set(APP_SOURCES
     src/vlk/queue.hpp
     src/vlk/semaphore.cpp
     src/vlk/semaphore.hpp
+    src/vlk/shader_module.cpp
+    src/vlk/shader_module.hpp
     src/vlk/surface.cpp
     src/vlk/surface.hpp
     src/vlk/swapchain.cpp
@@ -43,8 +47,6 @@ set(APP_SOURCES
     src/application.cpp
     src/application.hpp
     src/main.cpp
-    src/vma_buffer.cpp
-    src/vma_buffer.hpp
 )
 
 add_executable(app

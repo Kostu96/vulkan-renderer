@@ -10,6 +10,7 @@ namespace vlk {
 class Device;
 class Semaphore;
 
+// TODO(Kostu): add swapchain recreate into Swapchain?
 class Swapchain final :
     NonCopyable {
 public:
@@ -37,8 +38,12 @@ public:
     NextImage acquire_next_image(const Semaphore& semaphore) const;
 
     operator VkSwapchainKHR() const noexcept { return handle_; }
+
+    Swapchain& operator=(Swapchain&& other) noexcept;
 private:
-    const Device& device_;
+    void destroy() noexcept;
+
+    std::reference_wrapper<const Device> device_;
     VkSwapchainKHR handle_ = VK_NULL_HANDLE;
     std::vector<VkImage> images_;
     std::vector<VkImageView> image_views_;

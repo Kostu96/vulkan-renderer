@@ -18,10 +18,14 @@ MemoryAllocator::MemoryAllocator(const Instance& instance,
     };
     VmaVulkanFunctions vulkan_functions;
     VkResult result = vmaImportVulkanFunctionsFromVolk(&create_info, &vulkan_functions);
+    if (result != VK_SUCCESS) {
+        throw std::runtime_error{ "Failed to import vulkan functions." };
+    }
+
     create_info.pVulkanFunctions = &vulkan_functions;
     result = vmaCreateAllocator(&create_info, &handle_);
     if (result != VK_SUCCESS) {
-        throw std::runtime_error{ "Failed to create VMA allocator." };
+        throw std::runtime_error{ "Failed to create memory allocator." };
     }
 }
 

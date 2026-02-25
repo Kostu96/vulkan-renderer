@@ -86,15 +86,12 @@ Swapchain::Swapchain(Swapchain &&other) noexcept :
 }
 
 Swapchain::~Swapchain() {
-    for (auto& image_view : image_views_) {
-        vkDestroyImageView(device_, image_view, nullptr);
-    }
-    vkDestroySwapchainKHR(device_, handle_, nullptr);
+    destroy();
 }
 
 Swapchain::NextImage Swapchain::acquire_next_image(const Semaphore& semaphore) const {
     NextImage next_image = {};
-    VkResult result = vkAcquireNextImageKHR(device_, handle_, std::numeric_limits<uint64_t>::max(), semaphore, VK_NULL_HANDLE, &next_image.image_index);
+    VkResult result = vkAcquireNextImageKHR(device_.get(), handle_, std::numeric_limits<uint64_t>::max(), semaphore, VK_NULL_HANDLE, &next_image.image_index);
     if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
         throw std::runtime_error{ "Failed to acquire swapchain image." };
     }
@@ -104,6 +101,32 @@ Swapchain::NextImage Swapchain::acquire_next_image(const Semaphore& semaphore) c
     next_image.should_recreate_swapchain = result == VK_ERROR_OUT_OF_DATE_KHR;
     
     return next_image;
+}
+
+Swapchain& Swapchain::operator=(Swapchain&& other) noexcept {
+    if (this != &other) {
+        destroy();
+
+        device_ = other.device_;
+        handle_ = std::exchange(other.handle_, VK_NULL_HANDLE);
+        images_ = std::move(other.images_);
+        image_views_ = std::move(other.image_views_);
+    }
+
+    return *this;
+}
+
+void Swapchain::destroy() noexcept {
+    for (auto& image_view : image_views_) {
+        vkDestroyImageView(device_.get(), image_view, nullptr);
+    }
+    image_views_.clear();
+    images_.clear();
+
+    if (handle_ != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(device_.get(), handle_, nullptr);
+        handle_ = VK_NULL_HANDLE;
+    }
 }
 
 }

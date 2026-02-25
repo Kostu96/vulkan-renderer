@@ -1,4 +1,5 @@
 #pragma once
+#include "vlk/buffer.hpp"
 #include "vlk/command_buffer.hpp"
 #include "vlk/command_pool.hpp"
 #include "vlk/device.hpp"
@@ -9,5 +10,6 @@
 #include "vlk/pipeline.hpp"
 #include "vlk/queue.hpp"
 #include "vlk/semaphore.hpp"
+#include "vlk/shader_module.hpp"
 #include "vlk/surface.hpp"
 #include "vlk/swapchain.hpp"

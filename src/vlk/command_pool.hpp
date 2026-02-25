@@ -3,7 +3,8 @@
 
 #include <volk/volk.h>
 
-#include <memory>
+#include <span>
+#include <vector>
 
 namespace vlk {
 
@@ -19,7 +20,9 @@ public:
 
     ~CommandPool();
 
-    std::unique_ptr<CommandBuffer> allocate_command_buffer() const;
+    std::vector<CommandBuffer> allocate_command_buffers(uint32_t count) const;
+
+    void free_command_buffers(std::span<const CommandBuffer> cmd_buffers) const;
 
     operator VkCommandPool() const noexcept { return handle_; }
 private:
